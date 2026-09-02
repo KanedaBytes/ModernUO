@@ -1,0 +1,18 @@
+[
+  {
+    "$type": "Spawner",
+    "guid": "78b7b5a1-6971-47a9-9978-0b73880dc307",
+    "name": "Old Marta",
+    "location": [1475, 1645, 20],
+    "map": "Trammel",
+    "count": 1,
+    "minDelay": "00:05:00",
+    "maxDelay": "00:10:00",
+    "team": 0,
+    "homeRange": 2,
+    "walkingRange": 0,
+    "entries": [
+      { "name": "OldMarta", "maxCount": 1, "probability": 100 }
+    ]
+  }
+]

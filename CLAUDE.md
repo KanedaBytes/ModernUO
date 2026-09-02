@@ -115,3 +115,5 @@ mkdir -p .claude/skills/<name> && cp dev-docs/claude-skills/migrate-from-runuo/<
 Migration skills reference the deep docs in `dev-docs/runuo-migration-docs/` and point to existing ModernUO skills for best practices.
 
 The `modernuo-code-audit` skill auto-triggers on `.cs` file edits and flags convention violations (warnings only, asks before fixing).
+
+@SHARD.md
