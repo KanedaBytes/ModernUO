@@ -71,3 +71,59 @@ Two hard constraints that must not be violated in `Custom/`:
   `BaseObjectiveInstance.Deserialize` is `public static` with a closed `switch` over a fixed
   four-value `DataType` enum, so extra fields could never be read back and would desync the world
   save stream.
+
+### Staff quest-reset commands (`Custom/Commands/ResetQuestCommands.cs`)
+
+`[ResetQuest` and `[ResetAllQuests` mutate a player's `MLQuestContext` through public API only.
+They depend on:
+
+1. `MLQuestContext.RemoveDoneQuest(MLQuest)` being `public` — the only way to clear a completion
+   record from outside the engine.
+2. `MLQuestInstance.Cancel(bool removeChain)` being `public`, and `Cancel(true)` running
+   `OnQuestCancelled` on each objective (which un-marks quest items) plus dropping the chain
+   offer. Prefer it over `Remove()`, which skips that cleanup.
+3. `MLQuestContext.QuestInstances` / `.ChainOffers` and `MLQuestSystem.Quests` /
+   `.GetContext(PlayerMobile)` all being public.
+4. `MLQuest.OnCancel` being an empty virtual with no overrides in the tree — so cancelling an
+   instance can never write a fresh completion record. If an upstream quest ever overrides it to
+   penalise cancelling, re-check the cancel-then-remove ordering in `ResetQuestTarget`.
+
+Known gap, deliberately worked around rather than patched upstream: `MLQuestContext` has no way
+to *enumerate* the completed list (`m_DoneQuests` is private with no accessor), so
+`[ResetAllQuests` clears it by iterating `MLQuestSystem.Quests.Values` and calling
+`RemoveDoneQuest` for each. That is complete, because records whose quest type no longer resolves
+are already discarded at load time by `MLDoneQuestInfo.Deserialize`. A public `DoneQuests`
+enumerator or a `ClearDoneQuests()` upstream would let this be a single call.
+
+### Restricted zones (`Custom/Zones/`)
+
+Restricted zones register their own regions at runtime and hand offenders to the upstream
+`JailSystem`. No upstream edit was needed. The seams relied on:
+
+1. `JailSystem.JailPlayer(Mobile, PlayerMobile, string)` and `JailSystem.IsPlayerJailed(PlayerMobile)`
+   staying `public static` — they are the entire public surface of that system.
+2. `GenericPersistence` being publicly subclassable, and a `Persistence` self-registering in its
+   constructor. The singleton must be built in `Configure()`, which runs before `World.Load()`.
+3. `BaseRegion`'s `(name, map, parent, ReadOnlySpan<Rectangle2D>)` constructor, and
+   `Region.Register()`/`Unregister()` re-resolving mobiles already standing in the affected
+   sectors — that is what makes a newly drawn zone apply to its current occupants.
+4. `BoundingBoxPicker.Begin`, `EventSink.Disconnected`, and `PlayerMobile.PlayerLoginEvent`.
+
+**Three upstream JailSystem bugs this code works around.** They barely affect a human typing
+`[Jail`, but an automated caller hits them. If any are fixed upstream, the workarounds here become
+redundant rather than wrong:
+
+- **Re-jailing an active prisoner releases them early.** `UnfreezePlayer` overwrites
+  `JailTimers[player]` without stopping the previous timer, so the old sentence's timer still
+  fires. `TryJail` guards with `IsPlayerJailed` so this shard never triggers it.
+- **After a restart, a mid-sentence prisoner can never be jailed again.** `Deserialize` adds them
+  to the private `CurrentlyBeingJailed` latch and only `UnfreezePlayer` removes them, which is
+  unreachable without a fresh jail sequence. `JailPlayer` then returns silently — no exception, no
+  log. `TryJail` asserts `IsPlayerJailed` immediately after calling and logs an error plus notifies
+  staff if the call was swallowed.
+- **A sentence expiring while the server is down strands the player in jail.** No release timer is
+  re-armed and there is no login check. Not fixable from `Custom/`; staff must move them out.
+
+Also note `JailPlayer` is called with `from: null` (no staff member is behind an automatic jail),
+which makes JailSystem's own `CommandLogging` call throw internally and swallow the entry. This
+system writes its own `LogFactory` line instead.
