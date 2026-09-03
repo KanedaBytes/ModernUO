@@ -59,6 +59,37 @@ below):
 - Nothing removes a player from `CurrentlyBeingJailed` on release, so a prisoner restored across a
   restart stays in that latch forever and every later `JailPlayer` call for them silently returns.
 
+### `Projects/UOContent/Systems/JailSystem/JailSystem.cs` — public `GetJailEndTime` accessor
+
+**What changed.** Purely additive: one method next to `IsPlayerJailed`. No existing line modified
+or deleted.
+
+```csharp
+public static DateTime GetJailEndTime(PlayerMobile player) =>
+    PlayerJailRecords.GetValueOrDefault(player)?.JailEndTime ?? DateTime.MinValue;
+```
+
+**Why it could not be done from `Custom/`.** `Custom/Jail/JailStatusGump.cs` shows a jailed player
+how long is left, which needs the sentence end time. JailSystem exposed no read path for it: the
+public surface is `JailMap`, `ReleaseMap`, `Configure`, the constructor, `IsPlayerJailed`,
+`JailPlayer`, `CheckJailOnLogin` and the two serialization overrides — and only `IsPlayerJailed`
+reads state, returning a `bool`. `JailRecord.JailEndTime` is a public property, but the only
+container of records (`PlayerJailRecords`) and the fallback (`EmptyRecord`) are both
+`private static`, and `JailRecordGump`'s public constructor takes a `JailRecord` that cannot be
+obtained from outside. `[JailInfo` works only because it lives inside the class. The alternative
+was reflecting over the private dictionary, which would fail silently at runtime on a field rename
+— in a gump players look at.
+
+**Re-verify after an upstream merge:**
+1. That the method still exists — a merge that rewrites the area around `IsPlayerJailed` could
+   drop it, which *would* fail the build, so this one is self-announcing.
+2. That `JailRecord.JailEndTime` still means "when the sentence ends" and is still stamped at jail
+   time rather than at release-timer arming. `Custom/Jail/JailStatusSystem.cs` subtracts
+   `Core.Now` from it directly.
+3. That `PlayerJailRecords` still keys on `PlayerMobile` (per character, not per account).
+4. **If upstream adds its own public accessor, delete this one** and repoint
+   `JailStatusSystem.GetRemaining` at theirs rather than keeping both.
+
 ## Notes on files that look like modifications but aren't
 
 - **`Projects/UOContent/Migrations/Server.Custom.*.v0.json`** — the serialization schema record

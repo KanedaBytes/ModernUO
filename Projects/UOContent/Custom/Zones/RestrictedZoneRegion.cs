@@ -55,9 +55,21 @@ public class RestrictedZoneRegion : BaseRegion
 
         // Also reached while a mobile is being deleted, with items mid-strip - so this must not
         // assume the mobile is in a usable state.
-        if (m is PlayerMobile pm)
+        if (m is not PlayerMobile pm)
         {
-            RestrictedZoneSystem.CancelCountdown(pm);
+            return;
+        }
+
+        // Capture before cancelling: only someone who was actually being counted down should be
+        // told they got out in time. The message lives here rather than in CancelCountdown because
+        // that also runs on disconnect, on re-entry, and after a jail - none of which "left".
+        var escaped = !pm.Deleted && RestrictedZoneSystem.HasCountdown(pm);
+
+        RestrictedZoneSystem.CancelCountdown(pm);
+
+        if (escaped)
+        {
+            pm.SendMessage(0x40, $"You have left {Record.Name}.");
         }
     }
 

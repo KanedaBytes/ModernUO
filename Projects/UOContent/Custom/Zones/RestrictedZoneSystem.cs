@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using ModernUO.CodeGeneratedEvents;
+using Server.Gumps;
 using Server.Logging;
 using Server.Mobiles;
 using JailSys = Server.Systems.JailSystem.JailSystem;
@@ -30,7 +31,22 @@ public class RestrictedZoneSystem : GenericPersistence
 
     // Transient by design: a restart clears every pending countdown, so nobody is ever jailed by a
     // timer they could not see.
-    private static readonly Dictionary<PlayerMobile, Timer> _countdowns = [];
+    private static readonly Dictionary<PlayerMobile, ZoneCountdown> _countdowns = [];
+
+    /// <summary>
+    ///     Per-player countdown state. One 1-second repeating timer drives both the on-screen gump
+    ///     and the jail at zero, so there is only ever one timer per player to cancel.
+    ///     <para>
+    ///         Counting an int down avoids clock arithmetic entirely - there are no tick-count
+    ///         comparisons here to get wrong.
+    ///     </para>
+    /// </summary>
+    private sealed class ZoneCountdown
+    {
+        public string ZoneName;
+        public int Remaining;
+        public Timer Timer;
+    }
 
     /// <summary>
     ///     Must be constructed in Configure(), which runs before World.Load(). A GenericPersistence
@@ -130,18 +146,58 @@ public class RestrictedZoneSystem : GenericPersistence
         );
         pm.PlaySound(0x1F3);
 
-        _countdowns[pm] = Timer.DelayCall(WarningDelay, OnCountdownExpired, pm);
+        var countdown = new ZoneCountdown
+        {
+            ZoneName = region.Record.Name,
+            Remaining = (int)WarningDelay.TotalSeconds
+        };
+
+        _countdowns[pm] = countdown;
+
+        RestrictedZoneCountdownGump.DisplayTo(pm, countdown.ZoneName, countdown.Remaining);
+
+        countdown.Timer = Timer.DelayCall(
+            TimeSpan.FromSeconds(1.0),
+            TimeSpan.FromSeconds(1.0),
+            0,
+            OnCountdownTick,
+            pm
+        );
     }
+
+    public static bool HasCountdown(Mobile m) => m is PlayerMobile pm && _countdowns.ContainsKey(pm);
 
     public static void CancelCountdown(PlayerMobile pm)
     {
         // Always stop before dropping the reference. JailSystem omits this on its own release
         // timers and the stale timer fires anyway - the same mistake here would jail someone who
         // had already left.
-        if (_countdowns.Remove(pm, out var timer))
+        if (_countdowns.Remove(pm, out var countdown))
         {
-            timer.Stop();
+            countdown.Timer?.Stop();
+            pm.CloseGump<RestrictedZoneCountdownGump>();
         }
+    }
+
+    private static void OnCountdownTick(PlayerMobile pm)
+    {
+        if (!_countdowns.TryGetValue(pm, out var countdown))
+        {
+            return;
+        }
+
+        countdown.Remaining--;
+
+        if (countdown.Remaining > 0)
+        {
+            // Singleton replaces the previous instance, so this refreshes rather than stacks - and
+            // it also puts the gump back if the player somehow dismissed it.
+            RestrictedZoneCountdownGump.DisplayTo(pm, countdown.ZoneName, countdown.Remaining);
+            return;
+        }
+
+        CancelCountdown(pm);
+        OnCountdownExpired(pm);
     }
 
     private static bool ShouldWarn(PlayerMobile pm) =>
@@ -149,8 +205,6 @@ public class RestrictedZoneSystem : GenericPersistence
 
     private static void OnCountdownExpired(PlayerMobile pm)
     {
-        _countdowns.Remove(pm);
-
         var region = GetZoneAt(pm);
 
         // Re-validate: 30 seconds is a long time. They may have died, gone staff, or the zone may
@@ -211,6 +265,9 @@ public class RestrictedZoneSystem : GenericPersistence
 
         logger.Information("Jailed {Player} for {Reason}", pm.Name, reason);
         NotifyStaff($"{pm.Name} was jailed automatically. Reason: {reason}");
+
+        // Show the sentence gump immediately rather than waiting for the next minute sweep.
+        JailStatusSystem.ShowNow(pm);
     }
 
     private static void NotifyStaff(string message)

@@ -82,6 +82,14 @@ public class JailSystem : GenericPersistence
     public static bool IsPlayerJailed(PlayerMobile player) =>
         PlayerJailRecords.GetValueOrDefault(player)?.IsCurrentlyJailed == true;
 
+    /// <summary>
+    ///     When the player's current sentence ends, or <see cref="DateTime.MinValue" /> if they have
+    ///     no jail record. Pair with <see cref="IsPlayerJailed" /> rather than comparing this to
+    ///     <c>Core.Now</c> directly, so there is only one definition of "jailed".
+    /// </summary>
+    public static DateTime GetJailEndTime(PlayerMobile player) =>
+        PlayerJailRecords.GetValueOrDefault(player)?.JailEndTime ?? DateTime.MinValue;
+
     private static TimeSpan CalculateJailTime(int jailCount)
     {
         var totalMinutes = MinJailTime + (jailCount - 1) * (MaxJailTime - MinJailTime) / 9.0;
