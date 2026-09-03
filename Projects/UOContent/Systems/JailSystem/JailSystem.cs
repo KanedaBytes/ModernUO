@@ -56,7 +56,11 @@ public class JailSystem : GenericPersistence
 
     // Release location, change this for custom maps
     private static readonly Point3D ReleaseLocation = new(1444, 1697, 10); // Britain Bank
-    public static readonly Map ReleaseMap = Map.Felucca;
+
+    // Fallback facet, used when the record predates the origin map being stored or the player was
+    // jailed from somewhere without a Britain (Ilshenar, Malas, Tokuno, Ter Mur). Felucca and
+    // Trammel share terrain, so ReleaseLocation is the bank on both.
+    public static readonly Map ReleaseMap = Map.Trammel;
 
     private static JailSystem Instance;
 
@@ -113,6 +117,10 @@ public class JailSystem : GenericPersistence
         record.LastJailed = Core.Now;
         record.LastJailReason = reason;
         record.JailedBy = from;
+
+        // Captured before the teleport to jail, so release can return them to the facet they were
+        // taken from rather than always dropping them on Felucca.
+        record.OriginMap = player.Map;
 
         var jailTime = CalculateJailTime(record.JailCount);
         record.JailEndTime = Core.Now + jailTime;
@@ -223,9 +231,21 @@ public class JailSystem : GenericPersistence
         Timer.DelayCall(TimeSpan.FromSeconds(5.0), TeleportFromJail, from, player);
     }
 
+    /// <summary>
+    ///     The facet to release <paramref name="player" /> to: the one they were jailed from, when
+    ///     that facet actually has a Britain. Ilshenar, Malas, Tokuno and Ter Mur do not, so
+    ///     releasing to <see cref="ReleaseLocation" /> there would drop the player in open country.
+    /// </summary>
+    private static Map GetReleaseMap(PlayerMobile player)
+    {
+        var origin = PlayerJailRecords.GetValueOrDefault(player)?.OriginMap;
+
+        return origin == Map.Felucca || origin == Map.Trammel ? origin : ReleaseMap;
+    }
+
     private static void TeleportFromJail(Mobile from, PlayerMobile player)
     {
-        player.MoveToWorld(ReleaseLocation, ReleaseMap);
+        player.MoveToWorld(ReleaseLocation, GetReleaseMap(player));
 
         if (from != null)
         {
