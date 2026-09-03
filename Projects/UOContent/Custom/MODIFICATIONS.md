@@ -6,7 +6,58 @@ genuinely could not be done any other way.
 
 ## Modifications
 
-None.
+### `Projects/UOContent/Systems/JailSystem/JailSystem.cs` — jail release safety net on login
+
+**What changed.** Purely additive: two `using` directives (`ModernUO.CodeGeneratedEvents`,
+`Server.Regions`) and one new method, `CheckJailOnLogin`, decorated with
+`[OnEvent(nameof(PlayerMobile.PlayerLoginEvent))]`. **No existing line was modified or deleted**
+(54 insertions, 0 deletions).
+
+**Why it could not be done from `Custom/`.** The fix needs `PlayerJailRecords` and `JailTimers`
+to decide whether a player is stranded and to re-arm a release, and it needs `ReleasePlayer` to
+let them out. All three are `private static`, and there is no public release API — `Unjail` is a
+private command handler that refuses anyone who is not "currently jailed", which is precisely the
+state a stranded player is in. Reimplementing the release in `Custom/` would mean duplicating the
+freeze/teleport/unfreeze sequence and writing to a record we cannot read.
+
+**The bug.** `JailSystem.Deserialize` only re-arms a release timer when
+`record.IsCurrentlyJailed` is true. A sentence that expires while the server is down therefore
+gets no timer at all, and the system has no login check. The player logs back in inside the
+`JailRegion` — no skills, no spells, no travel, no combat (`JailRegion.cs:23-89`) — with nothing
+scheduled to release them, and `[Unjail` rejects them because their sentence has already
+"ended". The only remedy was a staff member noticing and moving them out by hand. Reported
+against upstream behaviour as of commit `5f0561b7f` ("feat: New Jail System (#2215)").
+
+**What the new method does**, once per login:
+- Sentence expired *and* the player is still inside a `JailRegion` → the release never happened,
+  so run `ReleasePlayer`.
+- Sentence still running but no entry in `JailTimers` → re-arm the release timer, so a live
+  prisoner can never be left with nothing to let them out.
+- Otherwise do nothing. It also returns early when `player.Frozen`, which means a jail or release
+  sequence is already in flight for that session.
+
+**Re-verify after an upstream merge:**
+1. That the method still exists and still carries its `[OnEvent]` attribute — a merge that
+   rewrites the usings block or the region around `UnfreezeFromRelease` could drop it silently,
+   and nothing would fail to compile.
+2. That `PlayerMobile.PlayerLoginEvent` still exists and still fires *after* `SendLoginComplete()`
+   in `IncomingAccountPackets.cs`. The check reads `player.Location`/`player.Map`, so an earlier
+   firing point would evaluate a stale location and miss stranded players.
+3. That `Deserialize` still skips timer re-arming for expired sentences. **If upstream fixes this
+   properly, delete this modification** rather than keeping both.
+4. That `ReleasePlayer`, `PlayerJailRecords` and `JailTimers` keep their current signatures and
+   semantics — particularly that `ReleasePlayer` still tolerates a null `from` (it guards its
+   `CommandLogging` calls) and still sets `record.JailEndTime = Core.Now`.
+5. That `JailRegion` is still the region type used for the jail, and is still reachable via
+   `Region.Find(...).IsPartOf<JailRegion>()`.
+
+**Related bugs deliberately NOT fixed here**, to keep this edit minimal — both are separate from
+the stranding bug and are worked around from `Custom/` instead (see the restricted zones entry
+below):
+- `UnfreezePlayer` overwrites `JailTimers[player]` without stopping the previous timer, so
+  re-jailing an active prisoner releases them early and then fires a second release.
+- Nothing removes a player from `CurrentlyBeingJailed` on release, so a prisoner restored across a
+  restart stays in that latch forever and every later `JailPlayer` call for them silently returns.
 
 ## Notes on files that look like modifications but aren't
 

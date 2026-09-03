@@ -15,10 +15,12 @@
 
 using System;
 using System.Collections.Generic;
+using ModernUO.CodeGeneratedEvents;
 using Server.Mobiles;
 using Server.Network;
 using Server.Commands;
 using Server.Gumps;
+using Server.Regions;
 
 namespace Server.Systems.JailSystem;
 
@@ -235,6 +237,58 @@ public class JailSystem : GenericPersistence
         if (from != null)
         {
             CommandLogging.WriteLine(from, $"Player {player.Name} unfrozen after jail release");
+        }
+    }
+
+    /// <summary>
+    ///     Safety net for sentences that outlive the server process.
+    ///     <para>
+    ///         <see cref="Deserialize" /> only re-arms a release timer when the sentence is still
+    ///         running. If it expired while the server was down, nothing releases the player: they
+    ///         log back in inside the jail region with no skills, spells, travel or combat, and
+    ///         <c>[unjail</c> refuses them because they are no longer "currently jailed". The only
+    ///         way out was a staff member moving them by hand.
+    ///     </para>
+    ///     <para>
+    ///         This runs once per login and covers both halves - it releases anyone stranded past
+    ///         the end of their sentence, and re-arms a missing timer for a sentence still running
+    ///         so a live prisoner can never be left with nothing to let them out.
+    ///     </para>
+    /// </summary>
+    [OnEvent(nameof(PlayerMobile.PlayerLoginEvent))]
+    public static void CheckJailOnLogin(PlayerMobile player)
+    {
+        // Frozen means a jail or release sequence is already in flight for this session.
+        if (player?.Deleted != false || player.Frozen)
+        {
+            return;
+        }
+
+        if (!PlayerJailRecords.TryGetValue(player, out var record))
+        {
+            return;
+        }
+
+        if (record.IsCurrentlyJailed)
+        {
+            if (!JailTimers.ContainsKey(player))
+            {
+                JailTimers[player] = Timer.DelayCall(
+                    record.JailEndTime - Core.Now,
+                    ReleasePlayer,
+                    record.JailedBy,
+                    player
+                );
+            }
+
+            return;
+        }
+
+        // The sentence is over. If they are still inside the jail, the release never happened.
+        if (player.Map != null && player.Map != Map.Internal &&
+            Region.Find(player.Location, player.Map).IsPartOf<JailRegion>())
+        {
+            ReleasePlayer(record.JailedBy, player);
         }
     }
 
