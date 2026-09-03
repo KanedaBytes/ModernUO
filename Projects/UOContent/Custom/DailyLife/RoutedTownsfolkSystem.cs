@@ -19,6 +19,22 @@ public static class RoutedTownsfolkSystem
 
     public static int WalkerCount => _walkers.Count;
 
+    /// <summary>
+    ///     Rebuilds the route walkers from the current config. The teardown is essential - without
+    ///     it a reload would leave the previous courier and farmer walking alongside the new ones.
+    /// </summary>
+    public static void Reload()
+    {
+        for (var i = _walkers.Count - 1; i >= 0; i--)
+        {
+            _walkers[i]?.Delete();
+        }
+
+        _walkers.Clear();
+
+        Initialize();
+    }
+
     public static void Initialize()
     {
         var config = TownScheduleConfig.Current;

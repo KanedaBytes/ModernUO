@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.IO;
 using Server.Json;
@@ -42,19 +43,44 @@ public class TownScheduleConfig
         return Routes.GetValueOrDefault(name);
     }
 
-    public static void Configure()
+    public static void Configure() => TryLoad(out _);
+
+    /// <summary>
+    ///     Reads the config file, replacing <see cref="Current" /> only on success.
+    ///     <para>
+    ///         A malformed file must not take the town down: <c>JsonConfig.Deserialize</c> throws
+    ///         <c>JsonException</c> on bad input, so a failed reload leaves the running config in
+    ///         place and reports why. That is the difference between a typo costing a retry and a
+    ///         typo emptying the town.
+    ///     </para>
+    /// </summary>
+    public static bool TryLoad(out string error)
     {
         var path = Path.Combine(Core.BaseDirectory, ConfigPath);
 
-        Current = JsonConfig.Deserialize<TownScheduleConfig>(path);
-
-        if (Current == null)
+        try
         {
-            logger.Warning("No town schedule config found at {Path}; daily life is inactive", ConfigPath);
-            return;
-        }
+            var loaded = JsonConfig.Deserialize<TownScheduleConfig>(path);
 
-        logger.Information("Loaded town schedule config from {Path}", ConfigPath);
+            if (loaded == null)
+            {
+                error = $"No config found at {ConfigPath}.";
+                logger.Warning("No town schedule config found at {Path}; daily life is inactive", ConfigPath);
+                return false;
+            }
+
+            Current = loaded;
+            error = null;
+
+            logger.Information("Loaded town schedule config from {Path}", ConfigPath);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            error = ex.Message;
+            logger.Error(ex, "Failed to parse town schedule config at {Path}; keeping the previous config", ConfigPath);
+            return false;
+        }
     }
 
     public class AnchorPoint

@@ -7,10 +7,10 @@
   },
 
   "tavern": {
-    "x": 1494,
-    "y": 1687,
-    "width": 9,
-    "height": 9,
+    "x": 1493,
+    "y": 1686,
+    "width": 11,
+    "height": 11,
     "z": 20,
     "map": "Trammel",
     "patronCount": 5,

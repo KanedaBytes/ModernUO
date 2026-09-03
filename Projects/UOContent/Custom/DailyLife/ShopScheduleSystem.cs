@@ -49,6 +49,20 @@ public static class ShopScheduleSystem
     [OnEvent(nameof(DayCycleSystem.DayPhaseChangedEvent))]
     public static void OnDayPhaseChanged(DayPhase oldPhase, DayPhase newPhase) => ApplyPhase(newPhase, false);
 
+    /// <summary>
+    ///     Re-applies the shop schedule from the current config.
+    ///     <para>
+    ///         Deliberately does NOT call <see cref="Initialize" />: that arms the repeating drive
+    ///         timer, so re-running it would leave a second timer stepping the shopkeepers and leak
+    ///         another one on every reload.
+    ///     </para>
+    ///     <para>
+    ///         Snaps rather than walks - a reload should put shopkeepers where the new config says
+    ///         they belong straight away, not send them strolling across town.
+    ///     </para>
+    /// </summary>
+    public static void Reload() => ApplyPhase(DayCycleSystem.Current, true);
+
     private static void ApplyPhase(DayPhase phase, bool snap)
     {
         var shops = TownScheduleConfig.Current?.Shops;

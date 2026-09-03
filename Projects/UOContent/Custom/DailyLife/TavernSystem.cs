@@ -31,6 +31,20 @@ public static class TavernSystem
     [OnEvent(nameof(DayCycleSystem.DayPhaseChangedEvent))]
     public static void OnDayPhaseChanged(DayPhase oldPhase, DayPhase newPhase) => ApplyPhase(newPhase);
 
+    /// <summary>
+    ///     Rebuilds the crowd from the current config.
+    ///     <para>
+    ///         Empties first rather than just re-applying: <see cref="FillTavern" /> only tops up to
+    ///         the wanted count, so lowering <c>patronCount</c> or moving the tavern bounds would
+    ///         otherwise have no visible effect.
+    ///     </para>
+    /// </summary>
+    public static void Reload()
+    {
+        EmptyTavern();
+        ApplyPhase(DayCycleSystem.Current);
+    }
+
     public static void ApplyPhase(DayPhase phase)
     {
         if (phase.IsAfterDark())

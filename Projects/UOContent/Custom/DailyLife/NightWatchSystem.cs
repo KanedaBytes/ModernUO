@@ -21,6 +21,17 @@ public static class NightWatchSystem
     [OnEvent(nameof(DayCycleSystem.DayPhaseChangedEvent))]
     public static void OnDayPhaseChanged(DayPhase oldPhase, DayPhase newPhase) => ApplyPhase(newPhase);
 
+    /// <summary>
+    ///     Rebuilds the watch from the current config. Stands down first because
+    ///     <see cref="Deploy" /> early-returns outright when the watch is already out, so changed
+    ///     posts or routes would otherwise be ignored.
+    /// </summary>
+    public static void Reload()
+    {
+        StandDown();
+        ApplyPhase(DayCycleSystem.Current);
+    }
+
     public static void ApplyPhase(DayPhase phase)
     {
         if (phase.IsAfterDark())
