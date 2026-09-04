@@ -233,8 +233,12 @@ Restricted zones register their own regions at runtime and hand offenders to the
 
 1. `JailSystem.JailPlayer(Mobile, PlayerMobile, string)` and `JailSystem.IsPlayerJailed(PlayerMobile)`
    staying `public static` — they are the entire public surface of that system.
-2. `GenericPersistence` being publicly subclassable, and a `Persistence` self-registering in its
-   constructor. The singleton must be built in `Configure()`, which runs before `World.Load()`.
+2. ~~`GenericPersistence` being publicly subclassable~~ - **no longer relied on.** Zones moved to
+   `Data/Custom/restricted-zones.json` so they are diffable, hand-editable and editable by the
+   shard editor. Records load in `Configure()`; regions are built in `Initialize()`, because a
+   zone region resolves its parent with `Region.Find` and the town regions it needs are loaded by
+   `RegionJsonSerializer` *after* the Configure sweep. `Saves/RestrictedZones/` is now dead - the
+   old `.bin` can be deleted once the server has been restarted on this code.
 3. `BaseRegion`'s `(name, map, parent, ReadOnlySpan<Rectangle2D>)` constructor, and
    `Region.Register()`/`Unregister()` re-resolving mobiles already standing in the affected
    sectors — that is what makes a newly drawn zone apply to its current occupants.
@@ -258,6 +262,57 @@ redundant rather than wrong:
 Also note `JailPlayer` is called with `from: null` (no staff member is behind an automatic jail),
 which makes JailSystem's own `CommandLogging` call throw internally and swallow the entry. This
 system writes its own `LogFactory` line instead.
+
+### Admin API listener (`Custom/AdminApi/`) - a vetted background thread
+
+`AdminApiServer` runs one dedicated `HttpListener` thread so the shard editor can read and write
+the config files and reload the systems that own them without a restart. Audit rule #10 says a new
+worker is recorded in the vetted table in `dev-docs/threading-model.md`; that is an upstream file,
+so the entry lives here instead to keep the fork's diff against upstream to `Custom/` only.
+
+**Why a thread at all.** Not for performance - `HttpListener.GetContext` is a blocking call, and
+the alternative is polling it from the game loop. The thread exists to *keep* the blocking off the
+loop, which is the opposite of the usual justification, so the measurement rule does not apply.
+
+**How it obeys the six rules.**
+
+1. *No game state off-thread.* The listener thread touches only sockets and files. Static files and
+   map tiles are disk reads. Everything else goes through `AdminApiLoop.TryRun`, which posts to
+   `Core.LoopContext` and waits for the result.
+2. *Policy on the loop.* Shape projection, config validation and reloads all run inside the posted
+   action, so nothing rule-dependent is decided off-thread.
+3. *Parks on a kernel wait.* `GetContext()` blocks; it never spins.
+4. *Yields to world saves.* Every non-GET request is refused with 503 unless
+   `World.WorldState == WorldState.Running`. Deliberately not `World.Saving`, which covers only the
+   freeze and misses `PendingSave`.
+5. *Bounded.* One thread, one request at a time, request bodies capped at 4 MB.
+6. *Everything it calls is safe off-thread.* The only off-loop work is `File`/`Path`/`HttpListener`.
+
+**The one subtlety worth keeping.** `AdminApiLoop` hands results back with a
+`TaskCompletionSource`, not a `ManualResetEventSlim`. If a request times out and the loop runs the
+posted work afterwards anyway, setting a result nobody is waiting on is harmless - whereas
+signalling a disposed reset event would throw *on the game thread*, from a request that had already
+given up. `RunContinuationsAsynchronously` keeps the waiter's continuation off the loop.
+
+**Upstream seams relied on:** `Core.LoopContext.Post`, `World.WorldState`, `EventSink.Shutdown`,
+`NetState.Instances`, `ServerConfiguration.GetOrUpdateSetting`/`SetSetting`, and
+`ImportSpawnersCommand.ImportFile` (which is `internal`, so this only works from inside
+`UOContent`). `SpawnerJsonSerializer.SerializeCompact` is used to write spawn files back in their
+on-disk layout; plain indented JSON would turn every save into a whole-file diff.
+
+### JSON config binding (`Custom/DailyLife/`, `Custom/Zones/`)
+
+`JsonConfig.GetOptions()` sets neither `PropertyNameCaseInsensitive` nor a `PropertyNamingPolicy`,
+so binding is case-**sensitive**. A PascalCase property therefore binds nothing against a
+camelCase key, and `JsonSerializer` reports success: every section comes back null and the feature
+is silently inert. `TownScheduleConfig` shipped in exactly that state - the whole daily life
+feature was dead on arrival and the only symptom was an empty Britain.
+
+Every config member in `Custom/` must carry an explicit `[JsonPropertyName]`, matching the repo
+convention (`MapLoader.MapDefinition`, `SpawnerDto`, `BanConfiguration`); the contract is spelled
+out in `Server.Tests/Tests/Network/Bans/BanConfigurationTests.cs`. Both config loaders now
+validate before replacing the live config, and `UOContent.Tests/Tests/Custom/` asserts that the
+shipped files still bind and validate, so schema drift fails in CI rather than in Britain.
 
 ### Britain daily life (`Custom/DailyLife/`)
 
