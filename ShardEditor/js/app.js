@@ -1,46 +1,41 @@
-// Wiring: state, input, undo, save, create and delete.
+// Wiring: state, input, undo, save, create, delete, duplicate.
 
 import { api, loadStoredToken, setToken, clearToken } from './api.js';
-import { View, DEFAULT_FACET } from './view.js';
+import { View, DEFAULT_FACET, BRITAIN } from './view.js';
 import {
     LAYERS, draw, drawEntities, drawDraft, hitTest, pick, geometryOf, applyGeometry, moveShape,
     resizeRect, moveNode
 } from './shapes.js';
-import { TOOLS, askFor, loadTypeLists, fillRouteList } from './tools.js';
+import { TOOLS, askFor, loadTypeLists, fillRouteList, fillList } from './tools.js';
+import { OVERLAY_LAYERS, emptyOverlays, fetchOverlays, counts, draw as drawOverlays } from './overlays.js';
 
 const ENTITY_POLL_MS = 1500;
 
+const $ = (id) => document.getElementById(id);
+
 const dom = {
-    gate: document.getElementById('token-gate'),
-    form: document.getElementById('token-form'),
-    tokenInput: document.getElementById('token-input'),
-    tokenError: document.getElementById('token-error'),
-    workspace: document.getElementById('workspace'),
-    canvas: document.getElementById('map'),
-    facet: document.getElementById('facet'),
-    save: document.getElementById('save'),
-    layers: document.getElementById('layers'),
-    createButtons: document.getElementById('create-buttons'),
-    properties: document.getElementById('properties'),
-    coords: document.getElementById('coords'),
-    hint: document.getElementById('hint'),
-    status: document.getElementById('status'),
-    banner: document.getElementById('banner'),
-    bannerText: document.getElementById('banner-text'),
-    bannerDiscard: document.getElementById('banner-discard'),
-    bannerDismiss: document.getElementById('banner-dismiss')
+    gate: $('token-gate'), form: $('token-form'), tokenInput: $('token-input'), tokenError: $('token-error'),
+    workspace: $('workspace'), canvas: $('map'), facet: $('facet'),
+    toolbar: $('toolbar'), menu: $('context-menu'),
+    filter: $('filter'), matches: $('matches'),
+    layers: $('layers'), overlayLayers: $('overlay-layers'),
+    properties: $('properties'), coords: $('coords'), hint: $('hint'), status: $('status'),
+    banner: $('banner'), bannerText: $('banner-text'),
+    bannerDiscard: $('banner-discard'), bannerDismiss: $('banner-dismiss')
 };
 
 const state = {
     facets: [],
     shapes: [],
     entities: [],
+    overlays: emptyOverlays(),
     visible: new Set(['zones', 'dailylife', 'spawners', 'entities']),
+    overlayVisible: new Set(),
     selected: null,
     hovered: null,
     // Shapes edited since the last save, so a save sends only what changed.
     dirty: new Set(),
-    // Session undo: each entry restores one shape's geometry to what it was before a drag.
+    // Session undo: each entry restores one shape's geometry to what it was before a change.
     undo: [],
     // The server's value for each shape at the moment it first became dirty. This is what makes
     // "discard" able to put the FILE back, not just the view - which matters because a save whose
@@ -48,9 +43,10 @@ const state = {
     baseline: new Map(),
     drag: null,
     spaceDown: false,
-    // The active create tool, and the geometry it has collected so far.
     tool: null,
-    draft: null
+    draft: null,
+    // Shapes matching the filter, or null when the filter is empty.
+    matches: null
 };
 
 const view = new View(dom.canvas);
@@ -91,7 +87,9 @@ async function connect(token, remember) {
 
         buildFacetPicker();
         buildLayerList();
-        buildCreateButtons();
+        buildOverlayList();
+
+        fillList('facet-list', state.facets.map((f) => f.name));
 
         // Size the canvas before choosing a view: setFacet's scale clamp reads the canvas box, and
         // the workspace has only just become visible.
@@ -132,6 +130,13 @@ function showFacet(facet) {
     dom.facet.value = facet.name;
     cancelTool();
     select(null);
+    loadOverlays(facet.name);
+    render();
+}
+
+async function loadOverlays(mapName) {
+    state.overlays = await fetchOverlays(api, mapName);
+    updateCounts();
     render();
 }
 
@@ -139,56 +144,63 @@ function buildLayerList() {
     dom.layers.innerHTML = '';
 
     for (const [key, layer] of Object.entries(LAYERS)) {
-        const item = document.createElement('li');
-        const label = document.createElement('label');
-        const checkbox = document.createElement('input');
-
-        checkbox.type = 'checkbox';
-        checkbox.checked = state.visible.has(key);
-        checkbox.addEventListener('change', () => {
-            checkbox.checked ? state.visible.add(key) : state.visible.delete(key);
-
-            if (state.selected && !checkbox.checked && state.selected.layer === key) {
-                select(null);
-            }
-
-            render();
-        });
-
-        const swatch = document.createElement('span');
-        swatch.className = 'swatch';
-        swatch.style.background = layer.color;
-
-        const count = document.createElement('span');
-        count.className = 'count';
-        count.dataset.layer = key;
-
-        label.append(checkbox, swatch, document.createTextNode(layer.label), count);
-        item.append(label);
-        dom.layers.append(item);
+        dom.layers.append(layerRow(key, layer.label, layer.color, state.visible));
     }
 }
 
-function buildCreateButtons() {
-    dom.createButtons.innerHTML = '';
+function buildOverlayList() {
+    dom.overlayLayers.innerHTML = '';
 
-    for (const [key, tool] of Object.entries(TOOLS)) {
-        const button = document.createElement('button');
-        button.type = 'button';
-        button.textContent = tool.label;
-        button.dataset.tool = key;
-        button.addEventListener('click', () => startTool(key));
-        dom.createButtons.append(button);
+    for (const [key, layer] of Object.entries(OVERLAY_LAYERS)) {
+        dom.overlayLayers.append(layerRow(key, layer.label, layer.color, state.overlayVisible));
     }
+}
+
+function layerRow(key, label, color, set) {
+    const item = document.createElement('li');
+    const row = document.createElement('label');
+    const checkbox = document.createElement('input');
+
+    checkbox.type = 'checkbox';
+    checkbox.checked = set.has(key);
+    checkbox.dataset.toggle = key;
+    checkbox.addEventListener('change', () => {
+        checkbox.checked ? set.add(key) : set.delete(key);
+
+        if (state.selected && !checkbox.checked && state.selected.layer === key) {
+            select(null);
+        }
+
+        render();
+    });
+
+    const swatch = document.createElement('span');
+    swatch.className = 'swatch';
+    swatch.style.background = color;
+
+    const count = document.createElement('span');
+    count.className = 'count';
+    count.dataset.layer = key;
+
+    row.append(checkbox, swatch, document.createTextNode(label), count);
+    item.append(row);
+
+    return item;
 }
 
 function updateCounts() {
+    const overlayCounts = counts(state.overlays);
+
     for (const element of dom.layers.querySelectorAll('.count')) {
         const layer = element.dataset.layer;
 
         element.textContent = layer === 'entities'
             ? state.entities.filter((e) => e.map === view.facet.name).length
             : state.shapes.filter((s) => s.layer === layer && s.map === view.facet.name).length;
+    }
+
+    for (const element of dom.overlayLayers.querySelectorAll('.count')) {
+        element.textContent = overlayCounts[element.dataset.layer] ?? 0;
     }
 }
 
@@ -213,11 +225,12 @@ async function refreshShapes({ force = false } = {}) {
     state.baseline.clear();
     state.undo.length = 0;
     state.selected = null;
-    dom.save.disabled = true;
 
     fillRouteList(state.shapes);
     showProperties(null);
+    applyFilter();
     updateCounts();
+    updateToolbar();
 
     return true;
 }
@@ -256,7 +269,8 @@ function render() {
         }
 
         view.drawMap();
-        draw(view.ctx, view, state.shapes, state.visible, state.selected, state.hovered);
+        drawOverlays(view.ctx, view, state.overlays, state.overlayVisible);
+        draw(view.ctx, view, state.shapes, state.visible, state.selected, state.hovered, state.matches);
 
         if (state.visible.has('entities')) {
             drawEntities(view.ctx, view, state.entities);
@@ -266,10 +280,6 @@ function render() {
     });
 }
 
-// A ResizeObserver on the canvas itself, rather than a window resize listener: it also fires for
-// the first real layout after the workspace stops being hidden, which is when the buffer must be
-// sized. The media query covers a move to a display with a different pixel ratio, where the CSS
-// box does not change but the buffer needs to.
 new ResizeObserver(() => {
     if (view.facet && view.resize()) {
         render();
@@ -291,9 +301,232 @@ function watchPixelRatio() {
 
 watchPixelRatio();
 
+// --- toolbar ---------------------------------------------------------------------------------
+
+dom.toolbar.addEventListener('click', (event) => {
+    const action = event.target.dataset?.act;
+
+    if (!action) {
+        return;
+    }
+
+    const midX = dom.canvas.clientWidth / 2;
+    const midY = dom.canvas.clientHeight / 2;
+
+    switch (action) {
+        case 'zoom-in': view.zoomAt(midX, midY, 1.5); render(); break;
+        case 'zoom-out': view.zoomAt(midX, midY, 1 / 1.5); render(); break;
+        case 'whole-map': view.fitAll(); render(); break;
+        case 'britain': view.goTo(BRITAIN.x, BRITAIN.y, 2); render(); break;
+        case 'goto': gotoCoordinate(); break;
+        case 'add': openAddMenu(event.target); break;
+        case 'duplicate': duplicateSelected(); break;
+        case 'delete': deleteSelected(); break;
+        case 'save': save(); break;
+        case 'discard': discard(); break;
+    }
+});
+
+function updateToolbar() {
+    const hasSelection = state.selected !== null;
+    const hasEdits = state.dirty.size > 0;
+
+    dom.toolbar.querySelector('[data-act="duplicate"]').disabled = !hasSelection;
+    dom.toolbar.querySelector('[data-act="delete"]').disabled = !hasSelection;
+    dom.toolbar.querySelector('[data-act="save"]').disabled = !hasEdits;
+    dom.toolbar.querySelector('[data-act="discard"]').disabled = !hasEdits;
+}
+
+async function gotoCoordinate() {
+    const values = await askFor({
+        title: 'Go to coordinate',
+        submit: 'Go',
+        fields: [
+            { key: 'x', label: 'X', required: true, value: String(Math.round(view.centerX)) },
+            { key: 'y', label: 'Y', required: true, value: String(Math.round(view.centerY)) }
+        ]
+    });
+
+    if (!values) {
+        return;
+    }
+
+    const x = Number(values.x);
+    const y = Number(values.y);
+
+    if (!Number.isFinite(x) || !Number.isFinite(y)) {
+        setStatus('That is not a coordinate.', 'error');
+        return;
+    }
+
+    view.goTo(x, y, Math.max(view.scale, 2));
+    render();
+}
+
+// --- context menu ------------------------------------------------------------------------------
+
+dom.canvas.addEventListener('contextmenu', (event) => {
+    event.preventDefault();
+
+    const [worldX, worldY] = view.toWorld(event.offsetX, event.offsetY);
+    const hit = pick(view, state.shapes, state.visible, worldX, worldY);
+
+    if (hit) {
+        select(hit);
+        render();
+        showMenu(event.clientX, event.clientY, shapeMenu(hit));
+        return;
+    }
+
+    showMenu(event.clientX, event.clientY, placeMenu(Math.floor(worldX), Math.floor(worldY)));
+});
+
+function shapeMenu(shape) {
+    return [
+        { heading: shape.label || shape.id },
+        { label: 'Properties', run: () => dom.properties.querySelector('input:not([readonly])')?.focus() },
+        { label: 'Duplicate', run: duplicateSelected },
+        { label: 'Delete', run: deleteSelected },
+        { divider: true },
+        { label: 'Center on', run: () => centerOnShape(shape) }
+    ];
+}
+
+function placeMenu(x, y) {
+    // Placing from the menu skips the tool's click phase - the click that opened the menu already
+    // said where.
+    const at = (key) => () => startTool(key, [x, y, 0]);
+
+    return [
+        { heading: `${x}, ${y}` },
+        { label: 'Add spawner here', run: at('spawner') },
+        { label: 'Add zone here', run: at('zone') },
+        { label: 'Add watch post here', run: at('watchpost') },
+        { label: 'Add townsfolk here', run: at('townsfolk') }
+    ];
+}
+
+function openAddMenu(button) {
+    const box = button.getBoundingClientRect();
+
+    showMenu(
+        box.left,
+        box.bottom + 4,
+        Object.entries(TOOLS).map(([key, tool]) => ({ label: tool.label, run: () => startTool(key) }))
+    );
+}
+
+function showMenu(x, y, items) {
+    dom.menu.innerHTML = '';
+
+    for (const item of items) {
+        const element = document.createElement('li');
+
+        if (item.divider) {
+            element.className = 'divider';
+        } else if (item.heading) {
+            element.className = 'heading';
+            element.textContent = item.heading;
+        } else {
+            element.textContent = item.label;
+            element.dataset.menu = item.label;
+            element.addEventListener('click', () => {
+                hideMenu();
+                item.run();
+            });
+        }
+
+        dom.menu.append(element);
+    }
+
+    dom.menu.hidden = false;
+
+    // Keep it on screen when opened near an edge.
+    const box = dom.menu.getBoundingClientRect();
+    dom.menu.style.left = `${Math.min(x, window.innerWidth - box.width - 8)}px`;
+    dom.menu.style.top = `${Math.min(y, window.innerHeight - box.height - 8)}px`;
+}
+
+function hideMenu() {
+    dom.menu.hidden = true;
+}
+
+window.addEventListener('mousedown', (event) => {
+    if (!dom.menu.hidden && !dom.menu.contains(event.target)) {
+        hideMenu();
+    }
+}, true);
+
+function centerOnShape(shape) {
+    const [x, y] = shape.kind === 'rect'
+        ? [shape.rect[0] + shape.rect[2] / 2, shape.rect[1] + shape.rect[3] / 2]
+        : shape.points[0];
+
+    if (shape.map !== view.facet.name) {
+        const facet = state.facets.find((f) => f.name === shape.map);
+
+        if (facet) {
+            showFacet(facet);
+        }
+    }
+
+    view.goTo(x, y, Math.max(view.scale, 2));
+    render();
+}
+
+// --- filter ------------------------------------------------------------------------------------
+
+dom.filter.addEventListener('input', () => {
+    applyFilter();
+    render();
+});
+
+function applyFilter() {
+    const term = dom.filter.value.trim().toLowerCase();
+
+    if (!term) {
+        state.matches = null;
+        dom.matches.innerHTML = '';
+        return;
+    }
+
+    const found = state.shapes.filter(
+        (shape) => state.visible.has(shape.layer)
+            && `${shape.label ?? ''} ${shape.id}`.toLowerCase().includes(term)
+    );
+
+    state.matches = new Set(found);
+    dom.matches.innerHTML = '';
+
+    for (const shape of found) {
+        const item = document.createElement('li');
+        const facet = document.createElement('span');
+
+        facet.className = 'layer';
+        facet.textContent = ` ${shape.map}`;
+
+        item.textContent = shape.label || shape.id;
+        item.dataset.match = shape.id;
+        item.append(facet);
+        item.addEventListener('click', () => {
+            select(shape);
+            centerOnShape(shape);
+        });
+
+        dom.matches.append(item);
+    }
+
+    if (found.length === 0) {
+        const empty = document.createElement('li');
+        empty.className = 'layer';
+        empty.textContent = 'No matches';
+        dom.matches.append(empty);
+    }
+}
+
 // --- create tools ------------------------------------------------------------------------------
 
-function startTool(key) {
+function startTool(key, placeAt = null) {
     cancelTool();
 
     const tool = TOOLS[key];
@@ -301,15 +534,24 @@ function startTool(key) {
     state.tool = { key, ...tool, phase: 0 };
     state.draft = { kind: tool.kind === 'rect' ? 'rect' : 'points', points: [], rect: null };
 
-    for (const button of dom.createButtons.querySelectorAll('button')) {
-        button.classList.toggle('active', button.dataset.tool === key);
-    }
-
     select(null);
 
-    // A townsperson has no map geometry - it starts wherever its route starts - so it goes straight
-    // to the form.
+    // No geometry to collect, or the context menu already said where.
     if (tool.kind === 'form') {
+        completeTool();
+        return;
+    }
+
+    if (placeAt && tool.kind === 'point') {
+        state.draft.points = [placeAt];
+        completeTool();
+        return;
+    }
+
+    if (placeAt && tool.kind === 'rect') {
+        // A default box centred on the click, rather than demanding a drag straight away. It can be
+        // resized on the canvas afterwards like any other rectangle.
+        state.draft.rect = [placeAt[0] - 8, placeAt[1] - 8, 16, 16];
         completeTool();
         return;
     }
@@ -322,11 +564,6 @@ function cancelTool() {
     state.tool = null;
     state.draft = null;
     dom.hint.textContent = '';
-
-    for (const button of dom.createButtons.querySelectorAll('button')) {
-        button.classList.remove('active');
-    }
-
     render();
 }
 
@@ -368,7 +605,6 @@ function toolClick(worldX, worldY) {
     return false;
 }
 
-/** Enter, or a double click, ends a multi-node tool. */
 function finishTool() {
     const tool = state.tool;
 
@@ -416,9 +652,7 @@ async function completeTool() {
 
     if (tool.kind === 'rect') {
         request.rect = draft.rect;
-    } else if (tool.kind === 'point') {
-        request.points = draft.points;
-    } else if (tool.kind === 'route') {
+    } else if (tool.kind === 'point' || tool.kind === 'route') {
         request.points = draft.points;
     } else if (tool.kind === 'point-then-route') {
         request.points = [draft.points[0]];
@@ -441,7 +675,24 @@ async function completeTool() {
     await reloadAndRefresh([tool.layer], `${tool.label} created.`);
 }
 
-// --- delete ------------------------------------------------------------------------------------
+// --- duplicate and delete ------------------------------------------------------------------------
+
+async function duplicateSelected() {
+    const shape = state.selected;
+
+    if (!shape) {
+        return;
+    }
+
+    try {
+        await api.duplicate({ layer: shape.layer, file: shape.file, pointer: shape.pointer });
+    } catch (error) {
+        showBanner(`Could not duplicate "${shape.label}": ${error.message}`);
+        return;
+    }
+
+    await reloadAndRefresh([shape.layer], `Duplicated ${shape.label}.`);
+}
 
 async function deleteSelected() {
     const shape = state.selected;
@@ -471,8 +722,6 @@ async function deleteSelected() {
 
 // --- saving --------------------------------------------------------------------------------------
 
-dom.save.addEventListener('click', save);
-
 async function save() {
     if (state.dirty.size === 0) {
         return;
@@ -486,26 +735,43 @@ async function save() {
             layer: shape.layer,
             file: shape.file,
             pointer: shape.pointer,
+            propsPointer: shape.propsPointer,
             rect: shape.kind === 'rect' ? shape.rect : undefined,
-            points: shape.kind === 'rect' ? undefined : shape.points
+            points: shape.kind === 'rect' ? undefined : shape.points,
+            props: propsPayload(shape)
         });
 
         layers.add(shape.layer);
     }
 
-    dom.save.disabled = true;
     setStatus('Saving...');
 
     try {
         await api.patch(edits);
     } catch (error) {
         // Nothing was written. Keep the edits so they can be corrected and saved again.
-        dom.save.disabled = false;
         showBanner(`Save failed, nothing was written: ${error.message}`);
         return;
     }
 
     await reloadAndRefresh([...layers], 'Saved and reloaded.');
+}
+
+/** Property values keyed by the path the server writes them to, not by the display key. */
+function propsPayload(shape) {
+    if (!shape.fields || !shape.editedProps) {
+        return undefined;
+    }
+
+    const payload = {};
+
+    for (const field of shape.fields) {
+        if (field.key in shape.editedProps) {
+            payload[field.path || field.key] = String(shape.props[field.key] ?? '');
+        }
+    }
+
+    return Object.keys(payload).length > 0 ? payload : undefined;
 }
 
 /**
@@ -528,7 +794,7 @@ async function reloadAndRefresh(layers, successMessage) {
         try {
             await api.reload(system);
         } catch (error) {
-            dom.save.disabled = state.dirty.size === 0;
+            updateToolbar();
 
             showBanner(
                 `Written to disk, but the server refused to load it, so the shard is still running `
@@ -544,26 +810,16 @@ async function reloadAndRefresh(layers, successMessage) {
 
     hideBanner();
     await refreshShapes({ force: true });
+
+    if (state.overlayVisible.size > 0) {
+        await loadOverlays(view.facet.name);
+    }
+
     render();
     setStatus(successMessage, 'ok');
 
     return true;
 }
-
-// --- banner --------------------------------------------------------------------------------------
-
-function showBanner(message, kind) {
-    dom.bannerText.textContent = message;
-    dom.banner.className = kind === 'warn' ? 'warn' : '';
-    dom.banner.hidden = false;
-    dom.bannerDiscard.hidden = state.dirty.size === 0;
-}
-
-function hideBanner() {
-    dom.banner.hidden = true;
-}
-
-dom.bannerDismiss.addEventListener('click', hideBanner);
 
 /**
  * Puts everything back the way the server has it - including the file.
@@ -573,17 +829,19 @@ dom.bannerDismiss.addEventListener('click', hideBanner);
  * would leave that bad file in place to fail on the next restart. Writing the baselines back is
  * what makes "discard" mean discard.
  */
-dom.bannerDiscard.addEventListener('click', async () => {
+async function discard() {
     const rollback = [];
     const layers = new Set();
 
-    for (const [shape, geometry] of state.baseline) {
+    for (const [shape, snap] of state.baseline) {
         rollback.push({
             layer: shape.layer,
             file: shape.file,
             pointer: shape.pointer,
-            rect: geometry.rect,
-            points: geometry.points
+            propsPointer: shape.propsPointer,
+            rect: snap.geometry?.rect,
+            points: snap.geometry?.points,
+            props: snap.props
         });
 
         layers.add(shape.layer);
@@ -613,11 +871,29 @@ dom.bannerDiscard.addEventListener('click', async () => {
     await refreshShapes({ force: true });
     render();
     setStatus('Edits discarded and the file restored.', 'ok');
-});
+}
+
+// --- banner --------------------------------------------------------------------------------------
+
+function showBanner(message, kind) {
+    dom.bannerText.textContent = message;
+    dom.banner.className = kind === 'warn' ? 'warn' : '';
+    dom.banner.hidden = false;
+    dom.bannerDiscard.hidden = state.dirty.size === 0;
+}
+
+function hideBanner() {
+    dom.banner.hidden = true;
+}
+
+dom.bannerDismiss.addEventListener('click', hideBanner);
+dom.bannerDiscard.addEventListener('click', discard);
 
 // --- input -----------------------------------------------------------------------------------
 
 dom.canvas.addEventListener('mousedown', (event) => {
+    hideMenu();
+
     // Middle button, or space held: always a pan, whatever is under the cursor.
     if (event.button === 1 || state.spaceDown) {
         event.preventDefault();
@@ -770,11 +1046,7 @@ window.addEventListener('mouseup', () => {
     }
 
     state.undo.push({ shape: drag.shape, geometry: drag.before });
-
-    if (!state.baseline.has(drag.shape)) {
-        state.baseline.set(drag.shape, drag.before);
-    }
-
+    snapshot(drag.shape, drag.before);
     markDirty(drag.shape);
 });
 
@@ -785,8 +1057,22 @@ dom.canvas.addEventListener('wheel', (event) => {
 }, { passive: false });
 
 window.addEventListener('keydown', (event) => {
-    // Never steal keys from the token box or a modal field.
+    // Never steal keys from the token box, a modal field or the filter.
     if (event.target.matches('input, select, textarea')) {
+        if (event.key === 'Escape') {
+            event.target.blur();
+        }
+
+        return;
+    }
+
+    if (event.ctrlKey || event.metaKey) {
+        const pressed = event.key.toLowerCase();
+
+        if (pressed === 's') { event.preventDefault(); save(); return; }
+        if (pressed === 'd') { event.preventDefault(); duplicateSelected(); return; }
+        if (pressed === 'z') { event.preventDefault(); undo(); return; }
+
         return;
     }
 
@@ -797,6 +1083,7 @@ window.addEventListener('keydown', (event) => {
     }
 
     if (event.key === 'Escape') {
+        hideMenu();
         state.tool ? cancelTool() : select(null);
         render();
         return;
@@ -814,9 +1101,20 @@ window.addEventListener('keydown', (event) => {
         return;
     }
 
-    if (event.key.toLowerCase() === 'z' && (event.ctrlKey || event.metaKey)) {
+    if (event.key.toLowerCase() === 'f') {
         event.preventDefault();
-        undo();
+        dom.filter.focus();
+        dom.filter.select();
+        return;
+    }
+
+    const nudge = {
+        ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1]
+    }[event.key];
+
+    if (nudge) {
+        event.preventDefault();
+        nudgeSelected(nudge[0], nudge[1], event.shiftKey ? 10 : 1);
     }
 });
 
@@ -825,6 +1123,24 @@ window.addEventListener('keyup', (event) => {
         state.spaceDown = false;
     }
 });
+
+function nudgeSelected(dx, dy, step) {
+    const shape = state.selected;
+
+    if (!shape) {
+        return;
+    }
+
+    const before = geometryOf(shape);
+
+    moveShape(shape, dx * step, dy * step);
+
+    state.undo.push({ shape, geometry: before });
+    snapshot(shape, before);
+    markDirty(shape);
+    showProperties(shape);
+    render();
+}
 
 function undo() {
     const step = state.undo.pop();
@@ -842,9 +1158,27 @@ function undo() {
     setStatus('Undone.');
 }
 
+/** Records the server's value for a shape the first time it changes, for discard to restore. */
+function snapshot(shape, geometry) {
+    if (state.baseline.has(shape)) {
+        return;
+    }
+
+    const props = {};
+
+    for (const field of shape.fields || []) {
+        props[field.path || field.key] = String(shape.props?.[field.key] ?? '');
+    }
+
+    state.baseline.set(shape, {
+        geometry,
+        props: Object.keys(props).length > 0 ? props : undefined
+    });
+}
+
 function markDirty(shape) {
     state.dirty.add(shape);
-    dom.save.disabled = false;
+    updateToolbar();
 }
 
 // --- selection and properties ------------------------------------------------------------------
@@ -852,55 +1186,114 @@ function markDirty(shape) {
 function select(shape) {
     state.selected = shape;
     showProperties(shape);
+    updateToolbar();
 }
 
 function showProperties(shape) {
+    dom.properties.innerHTML = '';
+
     if (!shape) {
         dom.properties.innerHTML = '<p class="muted">Nothing selected.</p>';
         return;
     }
 
-    const rows = [];
+    const name = document.createElement('p');
+    name.className = 'name';
+    name.textContent = shape.label || shape.id;
 
+    const kind = document.createElement('p');
+    kind.className = 'kind';
+    kind.textContent = `${shape.kind} · ${LAYERS[shape.layer].label}`;
+
+    dom.properties.append(name, kind);
+
+    // Geometry is edited on the canvas, so it is shown but not typed into.
     if (shape.kind === 'rect') {
         const [x, y, w, h] = shape.rect;
-        rows.push(pair('X', x, 'Y', y), pair('Width', w, 'Height', h));
+        dom.properties.append(readonlyPair('X', x, 'Y', y), readonlyPair('Width', w, 'Height', h));
     } else if (shape.kind === 'point') {
         const [x, y, z] = shape.points[0];
-        rows.push(pair('X', x, 'Y', y), field('Z', z));
+        dom.properties.append(readonlyPair('X', x, 'Y', y), readonlyField('Z', z));
     } else {
-        rows.push(field('Nodes', shape.points.length));
+        dom.properties.append(readonlyField('Nodes', shape.points.length));
     }
 
-    for (const [key, value] of Object.entries(shape.props || {})) {
-        if (value !== null && typeof value === 'object') {
-            rows.push(field(key, Array.isArray(value) ? value.join(', ') : JSON.stringify(value)));
-        } else if (value !== null && value !== undefined) {
-            rows.push(field(key, value));
+    for (const field of shape.fields || []) {
+        dom.properties.append(editableField(shape, field));
+    }
+
+    const where = document.createElement('p');
+    where.className = 'kind';
+    where.style.whiteSpace = 'pre-line';
+    where.textContent = `${shape.file}\n${shape.pointer}`;
+    dom.properties.append(where);
+}
+
+function editableField(shape, field) {
+    const label = document.createElement('label');
+    const caption = document.createElement('span');
+    caption.textContent = field.label;
+
+    const input = document.createElement('input');
+    input.type = field.type === 'int' ? 'number' : 'text';
+    input.value = shape.props?.[field.key] ?? '';
+    input.dataset.field = field.key;
+    input.autocomplete = 'off';
+
+    const list = {
+        map: 'facet-list', vendor: 'vendor-list', creature: 'creature-list', route: 'route-list'
+    }[field.type];
+
+    if (list) {
+        input.setAttribute('list', list);
+    }
+
+    // Edits join the same dirty set as a drag, so one Save covers geometry and properties together
+    // and Discard can put both back.
+    input.addEventListener('change', () => {
+        snapshot(shape, geometryOf(shape));
+
+        shape.props = shape.props || {};
+        shape.editedProps = shape.editedProps || {};
+        shape.props[field.key] = input.value;
+        shape.editedProps[field.key] = true;
+
+        // Renaming should show immediately; the label is what the filter and the menus display.
+        if (field.key === 'name') {
+            shape.label = input.value;
         }
-    }
 
-    dom.properties.innerHTML = `
-        <p class="name">${escapeHtml(shape.label || shape.id)}</p>
-        <p class="kind">${shape.kind} &middot; ${escapeHtml(LAYERS[shape.layer].label)}</p>
-        ${rows.join('')}
-        <p class="kind">${escapeHtml(shape.file)}<br>${escapeHtml(shape.pointer)}</p>
-    `;
+        markDirty(shape);
+        applyFilter();
+        render();
+        setStatus('Edited - press Save to apply.', 'ok');
+    });
+
+    label.append(caption, input);
+
+    return label;
 }
 
-function field(label, value) {
-    return `<label><span>${escapeHtml(label)}</span>
-        <input value="${escapeHtml(String(value))}" readonly></label>`;
+function readonlyField(label, value) {
+    const wrap = document.createElement('label');
+    const caption = document.createElement('span');
+    const input = document.createElement('input');
+
+    caption.textContent = label;
+    input.value = value;
+    input.readOnly = true;
+
+    wrap.append(caption, input);
+
+    return wrap;
 }
 
-function pair(labelA, valueA, labelB, valueB) {
-    return `<div class="row">${field(labelA, valueA)}${field(labelB, valueB)}</div>`;
-}
+function readonlyPair(labelA, valueA, labelB, valueB) {
+    const row = document.createElement('div');
+    row.className = 'row';
+    row.append(readonlyField(labelA, valueA), readonlyField(labelB, valueB));
 
-function escapeHtml(value) {
-    return String(value ?? '').replace(/[&<>"']/g, (c) => ({
-        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
-    })[c]);
+    return row;
 }
 
 // --- status ----------------------------------------------------------------------------------

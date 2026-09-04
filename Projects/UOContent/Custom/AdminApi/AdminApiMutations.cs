@@ -391,6 +391,184 @@ internal static class AdminApiMutations
         return Edit(request.File, root => (AdminApiFiles.Append(root, "", spawner), null), out error, out pointer);
     }
 
+    // --- duplication -------------------------------------------------------------------------
+
+    /// <summary>
+    ///     Copies a shape, offset a couple of tiles so the copy is visible rather than exactly
+    ///     underneath the original.
+    ///     <para>
+    ///         Clones the JSON node rather than rebuilding from the projected shape, so fields the
+    ///         editor does not model - a route node's say, a spawner's delays - come along.
+    ///         Anything that must be unique is then replaced: a new guid, and a name that does not
+    ///         collide.
+    ///     </para>
+    /// </summary>
+    public static bool Duplicate(DeleteRequest request, out string error, out string pointer)
+    {
+        pointer = null;
+
+        var full = AdminApiFiles.Resolve(request.File);
+
+        if (full == null)
+        {
+            error = $"'{request.File}' is not an editable file.";
+            return false;
+        }
+
+        var source = request.Pointer;
+
+        if (request.Layer == AdminApiShapes.SpawnersLayer
+            && source.EndsWith("/location", StringComparison.Ordinal))
+        {
+            source = source[..^"/location".Length];
+        }
+
+        var root = AdminApiFiles.Load(full);
+        var original = AdminApiFiles.Follow(root, source);
+
+        if (original == null)
+        {
+            error = $"'{source}' does not exist in {request.File}.";
+            return false;
+        }
+
+        var copy = original.DeepClone();
+
+        Offset(copy);
+
+        if (copy is JsonObject obj)
+        {
+            if (obj.ContainsKey("guid"))
+            {
+                obj["guid"] = Guid.NewGuid().ToString();
+            }
+
+            if (obj["name"]?.GetValue<string>() is { } name)
+            {
+                obj["name"] = UniqueName(root, source, name);
+            }
+        }
+
+        // A named route is a key in an object, not an element in an array.
+        if (source.StartsWith("/routes/", StringComparison.Ordinal))
+        {
+            if (AdminApiFiles.Follow(root, "/routes") is not JsonObject routes)
+            {
+                error = "The config has no 'routes' section.";
+                return false;
+            }
+
+            var copyName = UniqueRouteName(routes, source["/routes/".Length..]);
+            routes[copyName] = copy;
+            pointer = $"/routes/{AdminApiFiles.Escape(copyName)}";
+        }
+        else
+        {
+            var container = source[..source.LastIndexOf('/')];
+            pointer = AdminApiFiles.Append(root, container, copy);
+
+            if (pointer == null)
+            {
+                error = $"Could not add a copy to {request.File}.";
+                return false;
+            }
+        }
+
+        AdminApiFiles.Save(full, root);
+
+        error = null;
+        return true;
+    }
+
+    /// <summary>Nudges a copy clear of its original, whatever shape it is.</summary>
+    private static void Offset(JsonNode node)
+    {
+        const int shift = 2;
+
+        switch (node)
+        {
+            case JsonObject obj:
+                if (obj["location"] is JsonArray location && location.Count >= 2)
+                {
+                    location[0] = location[0].GetValue<int>() + shift;
+                    location[1] = location[1].GetValue<int>() + shift;
+                }
+
+                if (obj["x"] != null && obj["y"] != null)
+                {
+                    obj["x"] = obj["x"].GetValue<int>() + shift;
+                    obj["y"] = obj["y"].GetValue<int>() + shift;
+                }
+
+                if (obj["homeRoute"] is JsonArray home)
+                {
+                    Offset(home);
+                }
+
+                break;
+
+            case JsonArray array:
+                foreach (var child in array)
+                {
+                    if (child != null)
+                    {
+                        Offset(child);
+                    }
+                }
+
+                break;
+        }
+    }
+
+    private static string UniqueName(JsonNode root, string source, string name)
+    {
+        // Only zones are addressed by name, so only they can actually collide.
+        if (!source.StartsWith("/zones/", StringComparison.Ordinal))
+        {
+            return name;
+        }
+
+        var zones = AdminApiFiles.Follow(root, "/zones") as JsonArray;
+
+        for (var attempt = 2; ; attempt++)
+        {
+            var candidate = $"{name} ({attempt})";
+            var taken = false;
+
+            if (zones != null)
+            {
+                foreach (var zone in zones)
+                {
+                    if (candidate.InsensitiveEquals(zone?["name"]?.GetValue<string>()))
+                    {
+                        taken = true;
+                        break;
+                    }
+                }
+            }
+
+            if (!taken)
+            {
+                return candidate;
+            }
+        }
+    }
+
+    private static string UniqueRouteName(JsonObject routes, string escaped)
+    {
+        var name = escaped.Replace("~1", "/").Replace("~0", "~");
+
+        for (var attempt = 2; ; attempt++)
+        {
+            var candidate = $"{name}-{attempt}";
+
+            if (!routes.ContainsKey(candidate))
+            {
+                return candidate;
+            }
+        }
+    }
+
     // --- deletion ----------------------------------------------------------------------------
 
     /// <summary>

@@ -70,6 +70,7 @@ export const TOOLS = {
 };
 
 const dom = {
+    ok: document.getElementById('modal-ok'),
     modal: document.getElementById('modal'),
     form: document.getElementById('modal-form'),
     title: document.getElementById('modal-title'),
@@ -117,9 +118,15 @@ function finish(values) {
     resolve?.(values);
 }
 
-/** Opens the modal and resolves with the field values, or null if cancelled. */
+/**
+ * Opens the modal and resolves with the field values, or null if cancelled.
+ *
+ * Takes anything with a title and a list of fields, so it serves both the create tools and one-off
+ * prompts like "go to coordinate" without a second dialog implementation.
+ */
 export function askFor(tool) {
     dom.title.textContent = tool.title;
+    dom.ok.textContent = tool.submit || 'Create';
     dom.error.textContent = '';
     dom.fields.innerHTML = '';
 
@@ -197,6 +204,10 @@ export function fillRouteList(shapes) {
         'route-list',
         shapes.filter((s) => s.id.startsWith('route:')).map((s) => s.label)
     );
+}
+
+export function fillList(id, values) {
+    fill(id, values);
 }
 
 function fill(id, values) {

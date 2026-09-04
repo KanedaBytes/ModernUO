@@ -15,9 +15,11 @@ const TILE_SIZE = 256;
  * the same terrain, so the same point is right there too. A facet with no entry opens fitted to
  * the window.
  */
+export const BRITAIN = { x: 1475, y: 1645 };
+
 const FACET_FOCUS = {
-    Trammel: { x: 1475, y: 1645, scale: 2 },
-    Felucca: { x: 1475, y: 1645, scale: 2 }
+    Trammel: { x: BRITAIN.x, y: BRITAIN.y, scale: 2 },
+    Felucca: { x: BRITAIN.x, y: BRITAIN.y, scale: 2 }
 };
 
 export const DEFAULT_FACET = 'Trammel';
@@ -96,6 +98,21 @@ export class View {
         this.centerX = x;
         this.centerY = y;
         this.clampCenter();
+    }
+
+    /** Jump to a place, optionally changing zoom. */
+    goTo(x, y, scale = null) {
+        if (scale !== null) {
+            this.scale = Math.max(Math.min(scale, 16), this.minScale());
+        }
+
+        this.centerOn(x, y);
+    }
+
+    /** Zoom out until the whole facet is on screen. */
+    fitAll() {
+        this.scale = this.minScale();
+        this.centerOn(this.facet.width / 2, this.facet.height / 2);
     }
 
     minScale() {

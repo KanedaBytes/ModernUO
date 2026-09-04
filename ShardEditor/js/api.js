@@ -79,6 +79,8 @@ export const api = {
     // Content-Length with a 411 before the listener ever sees the request.
     reload: (system) => request('POST', `/api/reload/${system}`, {}),
     types: () => request('GET', '/api/types'),
+    overlays: (map) => request('GET', `/api/overlays?map=${encodeURIComponent(map)}`),
+    duplicate: (target) => request('POST', '/api/shapes/duplicate', target),
     create: (shape) => request('POST', '/api/shapes/create', shape),
     // POST rather than DELETE: http.sys is particular about bodies on DELETE, and the pointer
     // identifying the shape has to travel somewhere.

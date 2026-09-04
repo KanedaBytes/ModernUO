@@ -228,6 +228,12 @@ public static class AdminApiServer
             case "/api/shapes/delete" when method == "POST":
                 DeleteShape(context);
                 return;
+            case "/api/shapes/duplicate" when method == "POST":
+                DuplicateShape(context);
+                return;
+            case "/api/overlays" when method == "GET":
+                Overlays(context, request.QueryString["map"]);
+                return;
             case "/api/types" when method == "GET":
                 Types(context);
                 return;
@@ -394,6 +400,47 @@ public static class AdminApiServer
         Send(context, 200, new { ok = true });
     }
 
+    private static void DuplicateShape(HttpListenerContext context)
+    {
+        if (!TryReadBody<AdminApiMutations.DeleteRequest>(context, out var request))
+        {
+            return;
+        }
+
+        if (!AdminApiLoop.TryRun(
+                () =>
+                {
+                    var ok = AdminApiMutations.Duplicate(request, out var duplicateError, out var created);
+                    return (ok, duplicateError, created);
+                },
+                out var result,
+                out var error
+            ))
+        {
+            Send(context, 503, new { error });
+            return;
+        }
+
+        if (!result.ok)
+        {
+            Send(context, 400, new { error = result.duplicateError });
+            return;
+        }
+
+        Send(context, 200, new { pointer = result.created });
+    }
+
+    private static void Overlays(HttpListenerContext context, string map)
+    {
+        if (!AdminApiLoop.TryRun(() => AdminApiOverlays.For(map), out var overlays, out var error))
+        {
+            Send(context, 503, new { error });
+            return;
+        }
+
+        Send(context, 200, overlays);
+    }
+
     private static void Types(HttpListenerContext context)
     {
         if (!AdminApiLoop.TryRun(AdminApiMutations.Types, out var types, out var error))
@@ -511,6 +558,8 @@ public static class AdminApiServer
                         ImportSpawnersCommand.ImportFile(new FileInfo(path), existing);
                         files++;
                     }
+
+                    AdminApiOverlays.Invalidate();
 
                     return files;
                 },

@@ -20,6 +20,21 @@
 <main id="workspace" hidden>
     <canvas id="map"></canvas>
 
+    <div id="toolbar">
+        <button data-act="zoom-out" title="Zoom out">&minus;</button>
+        <button data-act="zoom-in" title="Zoom in">+</button>
+        <button data-act="whole-map" title="Fit the whole facet">Whole map</button>
+        <button data-act="britain" title="Centre on Britain">Britain</button>
+        <button data-act="goto" title="Go to a coordinate">Go to&hellip;</button>
+        <span class="sep"></span>
+        <button data-act="add" title="Add a shape">Add&hellip;</button>
+        <button data-act="duplicate" title="Duplicate the selection (Ctrl+D)" disabled>Duplicate</button>
+        <button data-act="delete" title="Delete the selection (Del)" disabled>Delete</button>
+        <span class="sep"></span>
+        <button data-act="save" title="Save (Ctrl+S)" disabled>Save</button>
+        <button data-act="discard" title="Discard unsaved edits" disabled>Discard</button>
+    </div>
+
     <!-- Stays until dismissed. A save that fails must never scroll past in a toast: the whole
          reason edits used to vanish was a failure nobody saw. -->
     <div id="banner" hidden>
@@ -30,11 +45,18 @@
         </div>
     </div>
 
+    <ul id="context-menu" hidden></ul>
+
     <aside id="sidebar">
         <header>
             <select id="facet" title="Facet"></select>
-            <button id="save" disabled>Save</button>
         </header>
+
+        <section>
+            <h2>Filter</h2>
+            <input id="filter" type="search" placeholder="Filter by name (F)" autocomplete="off">
+            <ul id="matches"></ul>
+        </section>
 
         <section>
             <h2>Layers</h2>
@@ -42,8 +64,8 @@
         </section>
 
         <section>
-            <h2>Create</h2>
-            <div id="create-buttons"></div>
+            <h2>Stock content <span class="muted">(read-only)</span></h2>
+            <ul id="overlay-layers"></ul>
         </section>
 
         <section>
@@ -55,12 +77,15 @@
             <h2>Keys</h2>
             <dl class="keys">
                 <dt>Click</dt><dd>select</dd>
+                <dt>Right-click</dt><dd>menu</dd>
                 <dt>Drag</dt><dd>pan; moves the selected shape only</dd>
-                <dt>Space+drag</dt><dd>always pans</dd>
-                <dt>Middle drag</dt><dd>always pans</dd>
-                <dt>Wheel</dt><dd>zoom</dd>
-                <dt>Delete</dt><dd>remove the selection</dd>
+                <dt>Space / middle</dt><dd>always pans</dd>
+                <dt>Arrows</dt><dd>nudge 1 tile (Shift = 10)</dd>
+                <dt>Ctrl+S</dt><dd>save</dd>
+                <dt>Ctrl+D</dt><dd>duplicate</dd>
                 <dt>Ctrl+Z</dt><dd>undo</dd>
+                <dt>Delete</dt><dd>delete</dd>
+                <dt>F</dt><dd>focus the filter</dd>
                 <dt>Enter</dt><dd>finish a route</dd>
                 <dt>Esc</dt><dd>deselect, or cancel</dd>
             </dl>
@@ -89,6 +114,7 @@
 <datalist id="vendor-list"></datalist>
 <datalist id="creature-list"></datalist>
 <datalist id="route-list"></datalist>
+<datalist id="facet-list"></datalist>
 
 <script type="module" src="js/app.js"></script>
 </body>

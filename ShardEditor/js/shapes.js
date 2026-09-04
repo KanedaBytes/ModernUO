@@ -15,13 +15,19 @@ export const LAYERS = {
 const HANDLE = 5;
 const GRAB = 7;
 
-export function draw(ctx, view, shapes, visible, selected, hovered) {
+export function draw(ctx, view, shapes, visible, selected, hovered, matches) {
     for (const shape of shapes) {
         if (!visible.has(shape.layer) || shape.map !== view.facet.name) {
             continue;
         }
 
+        // Dimmed, not hidden: hiding a filtered-out shape reads as "it is gone", and the reason to
+        // filter is to find one thing among the others, not to remove the others.
+        const dimmed = matches !== null && !matches.has(shape);
+
+        ctx.globalAlpha = dimmed ? 0.22 : 1;
         drawShape(ctx, view, shape, shape === selected, shape === hovered);
+        ctx.globalAlpha = 1;
     }
 }
 
@@ -40,9 +46,11 @@ function drawShape(ctx, view, shape, isSelected, isHovered) {
         const sw = w * view.scale;
         const sh = h * view.scale;
 
-        ctx.globalAlpha = isHovered && !isSelected ? 0.3 : 0.18;
+        const opacity = ctx.globalAlpha;
+
+        ctx.globalAlpha = opacity * (isHovered && !isSelected ? 0.3 : 0.18);
         ctx.fillRect(sx, sy, sw, sh);
-        ctx.globalAlpha = 1;
+        ctx.globalAlpha = opacity;
         ctx.strokeRect(sx, sy, sw, sh);
 
         if (isSelected) {
@@ -217,7 +225,16 @@ export function hitTest(view, shapes, visible, selected, worldX, worldY) {
         }
     }
 
-    // Reverse order so the shape drawn last - the one visually on top - is picked first.
+    // Smallest thing first, not last-drawn first.
+    //
+    // Drawing order is the wrong rule for picking. The shop district is a 210x170 rectangle that
+    // contains the tavern, every shop, two watch posts and several routes; picking by draw order
+    // meant a click anywhere inside it selected the district and nothing else was reachable by
+    // mouse at all. Points and route nodes are small deliberate targets, so they win outright;
+    // among rectangles the smallest one wins, which is the one the click most specifically means.
+    let best = null;
+    let bestArea = Infinity;
+
     for (let i = shapes.length - 1; i >= 0; i--) {
         const shape = shapes[i];
 
@@ -225,13 +242,7 @@ export function hitTest(view, shapes, visible, selected, worldX, worldY) {
             continue;
         }
 
-        if (shape.kind === 'rect') {
-            const [x, y, w, h] = shape.rect;
-
-            if (worldX >= x && worldX <= x + w && worldY >= y && worldY <= y + h) {
-                return { shape, mode: 'move' };
-            }
-        } else {
+        if (shape.kind !== 'rect') {
             for (let n = 0; n < shape.points.length; n++) {
                 const [px, py] = shape.points[n];
 
@@ -239,10 +250,19 @@ export function hitTest(view, shapes, visible, selected, worldX, worldY) {
                     return { shape, mode: shape.kind === 'point' ? 'move' : 'node', index: n };
                 }
             }
+
+            continue;
+        }
+
+        const [x, y, w, h] = shape.rect;
+
+        if (worldX >= x && worldX <= x + w && worldY >= y && worldY <= y + h && w * h < bestArea) {
+            best = { shape, mode: 'move' };
+            bestArea = w * h;
         }
     }
 
-    return null;
+    return best;
 }
 
 function near([x, y], worldX, worldY, slack) {

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Text.Json.Nodes;
+using Server.Mobiles;
 
 namespace Server.Custom.AdminApi;
 
@@ -57,7 +58,37 @@ internal static class AdminApiShapes
 
         /// <summary>Set for shapes derived from data the editor cannot write back.</summary>
         public bool ReadOnly { get; init; }
+
+        /// <summary>
+        ///     Where a property edit is applied. Usually the same as <see cref="Pointer" />, but a
+        ///     spawner's shape points at its <c>location</c> array - that is what a drag moves -
+        ///     while its properties live on the object that owns it.
+        /// </summary>
+        public string PropsPointer { get; init; }
+
+        /// <summary>
+        ///     What the property grid may edit, and how. The client renders the grid from this
+        ///     rather than knowing anything about the underlying schemas, the same way it draws from
+        ///     the shape vocabulary. `Path` is relative to <see cref="PropsPointer" />.
+        /// </summary>
+        public List<Field> Fields { get; init; }
     }
+
+    internal sealed class Field
+    {
+        public string Key { get; init; }
+
+        public string Label { get; init; }
+
+        /// <summary>string, int, map, vendor, creature, route or body - drives both the input and the validation.</summary>
+        public string Type { get; init; }
+
+        /// <summary>Slash-separated path from the props pointer; defaults to the key.</summary>
+        public string Path { get; init; }
+    }
+
+    private static Field F(string key, string label, string type, string path = null) =>
+        new() { Key = key, Label = label, Type = type, Path = path };
 
     /// <summary>An edit from the editor. Exactly one of the geometry fields is normally set.</summary>
     internal sealed class Edit
@@ -67,6 +98,9 @@ internal static class AdminApiShapes
         public string File { get; set; }
 
         public string Pointer { get; set; }
+
+        /// <summary>Where properties are applied; defaults to <see cref="Pointer" />.</summary>
+        public string PropsPointer { get; set; }
 
         public int[] Rect { get; set; }
 
@@ -106,6 +140,8 @@ internal static class AdminApiShapes
                     Label = zone.Name,
                     File = RestrictedZoneSystem.ConfigPath,
                     Pointer = $"/zones/{i}",
+                    PropsPointer = $"/zones/{i}",
+                    Fields = [F("name", "Name", "string"), F("map", "Facet", "map")],
                     Rect = [zone.X, zone.Y, zone.Width, zone.Height],
                     Props = new Dictionary<string, object>
                     {
@@ -142,6 +178,8 @@ internal static class AdminApiShapes
                     Label = "Clock anchor",
                     File = file,
                     Pointer = "/anchor",
+                    PropsPointer = "/anchor",
+                    Fields = [F("map", "Facet", "map")],
                     Points = [[config.Anchor.X, config.Anchor.Y, config.Anchor.Z]],
                     Props = new Dictionary<string, object> { ["map"] = config.Anchor.Map }
                 }
@@ -160,6 +198,13 @@ internal static class AdminApiShapes
                     Label = "Tavern",
                     File = file,
                     Pointer = "/tavern",
+                    PropsPointer = "/tavern",
+                    Fields =
+                    [
+                        F("map", "Facet", "map"),
+                        F("z", "Spawn Z", "int"),
+                        F("patronCount", "Patrons", "int")
+                    ],
                     Rect = [config.Tavern.X, config.Tavern.Y, config.Tavern.Width, config.Tavern.Height],
                     Props = new Dictionary<string, object>
                     {
@@ -186,6 +231,8 @@ internal static class AdminApiShapes
                     Label = "Shop district",
                     File = file,
                     Pointer = "/shops",
+                    PropsPointer = "/shops",
+                    Fields = [F("map", "Facet", "map")],
                     Rect = [config.Shops.X, config.Shops.Y, config.Shops.Width, config.Shops.Height],
                     Props = new Dictionary<string, object> { ["map"] = config.Shops.Map }
                 }
@@ -205,6 +252,8 @@ internal static class AdminApiShapes
                         Label = shop.Vendor,
                         File = file,
                         Pointer = $"/shops/shops/{i}",
+                        PropsPointer = $"/shops/shops/{i}",
+                        Fields = [F("vendor", "Vendor type", "vendor")],
                         Points = [[shop.X, shop.Y, shop.Z]],
                         Props = new Dictionary<string, object> { ["vendor"] = shop.Vendor }
                     }
@@ -243,6 +292,8 @@ internal static class AdminApiShapes
                         Label = $"Watch post {i + 1}",
                         File = file,
                         Pointer = $"/watch/posts/{i}",
+                        PropsPointer = $"/watch/posts/{i}",
+                        Fields = [F("route", "Route (blank = stands still)", "route")],
                         Points = [[post.X, post.Y, post.Z]],
                         Props = new Dictionary<string, object> { ["route"] = post.Route }
                     }
@@ -353,6 +404,15 @@ internal static class AdminApiShapes
                         Label = string.IsNullOrEmpty(name) ? $"Spawner {i}" : name,
                         File = relative,
                         Pointer = $"/{i}/location",
+                        PropsPointer = $"/{i}",
+                        Fields =
+                        [
+                            F("name", "Name", "string"),
+                            F("creature", "Spawns", "creature", "entries/0/name"),
+                            F("count", "Count", "int"),
+                            F("maxCount", "Max of this type", "int", "entries/0/maxCount"),
+                            F("homeRange", "Wander range", "int")
+                        ],
                         Points =
                         [
                             [
@@ -364,13 +424,30 @@ internal static class AdminApiShapes
                         Props = new Dictionary<string, object>
                         {
                             ["name"] = name,
+                            // Every declared field needs a value here or the property grid renders
+                            // it blank and a save would clear it.
+                            ["creature"] = FirstEntry(spawner, "name"),
                             ["count"] = spawner["count"]?.GetValue<int>(),
+                            ["maxCount"] = FirstEntry(spawner, "maxCount"),
+                            ["homeRange"] = spawner["homeRange"]?.GetValue<int>(),
                             ["entries"] = EntryNames(spawner["entries"] as JsonArray)
                         }
                     }
                 );
             }
         }
+    }
+
+    private static object FirstEntry(JsonObject spawner, string key)
+    {
+        if (spawner["entries"] is not JsonArray entries || entries.Count == 0)
+        {
+            return null;
+        }
+
+        var value = entries[0]?[key];
+
+        return key == "name" ? value?.GetValue<string>() : value?.GetValue<int>();
     }
 
     private static List<string> EntryNames(JsonArray entries)
@@ -479,18 +556,187 @@ internal static class AdminApiShapes
             }
         }
 
-        if (edit.Props != null)
+        if (edit.Props is { Count: > 0 } && !ApplyProps(root, edit, out error))
         {
-            if (target is not JsonObject props)
+            return false;
+        }
+
+        error = null;
+        return true;
+    }
+
+    /// <summary>
+    ///     Writes property edits, validating each value the same way creating one would.
+    ///     <para>
+    ///         Validation is keyed on the field name rather than on a type the client sends, because
+    ///         the client's claim about a value is not evidence. A vendor that does not resolve, a
+    ///         facet that is not a facet and a body that is not male, female or random are all
+    ///         refused here - each of them is otherwise a silent runtime failure.
+    ///     </para>
+    /// </summary>
+    private static bool ApplyProps(JsonNode root, Edit edit, out string error)
+    {
+        var owner = AdminApiFiles.Follow(root, edit.PropsPointer ?? edit.Pointer);
+
+        if (owner is not JsonObject)
+        {
+            error = $"'{edit.PropsPointer ?? edit.Pointer}' is not an object.";
+            return false;
+        }
+
+        foreach (var (path, value) in edit.Props)
+        {
+            var key = path.Contains('/') ? path[(path.LastIndexOf('/') + 1)..] : path;
+
+            if (!ValidateProp(root, key, value, out error))
             {
-                error = $"'{edit.Pointer}' is not an object.";
                 return false;
             }
 
-            foreach (var (key, value) in edit.Props)
+            if (!SetAtPath(owner, path, Coerce(key, value), out error))
             {
-                props[key] = value?.DeepClone();
+                return false;
             }
+        }
+
+        error = null;
+        return true;
+    }
+
+    /// <summary>Walks a slash-separated relative path and sets the final segment.</summary>
+    private static bool SetAtPath(JsonNode owner, string path, JsonNode value, out string error)
+    {
+        var segments = path.Split('/');
+        var current = owner;
+
+        for (var i = 0; i < segments.Length - 1; i++)
+        {
+            current = current switch
+            {
+                JsonArray array when int.TryParse(segments[i], out var index)
+                                     && index >= 0 && index < array.Count => array[index],
+                JsonObject obj when obj.TryGetPropertyValue(segments[i], out var child) => child,
+                _ => null
+            };
+
+            if (current == null)
+            {
+                error = $"'{path}' does not exist here.";
+                return false;
+            }
+        }
+
+        var last = segments[^1];
+
+        switch (current)
+        {
+            case JsonArray array when int.TryParse(last, out var index)
+                                      && index >= 0 && index < array.Count:
+                array[index] = value;
+                break;
+            case JsonObject obj:
+                obj[last] = value;
+                break;
+            default:
+                error = $"'{path}' cannot be set.";
+                return false;
+        }
+
+        error = null;
+        return true;
+    }
+
+    /// <summary>Numeric fields must land in the file as numbers, not as the strings a form produces.</summary>
+    private static JsonNode Coerce(string key, JsonNode value)
+    {
+        if (!IsNumeric(key))
+        {
+            return value?.DeepClone();
+        }
+
+        return int.TryParse(value?.ToString(), out var number) ? JsonValue.Create(number) : value?.DeepClone();
+    }
+
+    private static bool IsNumeric(string key) =>
+        key is "z" or "count" or "maxCount" or "patronCount" or "homeRange" or "probability"
+            or "walkingRange" or "team" or "triggerRange";
+
+    private static bool ValidateProp(JsonNode root, string key, JsonNode value, out string error)
+    {
+        var text = value?.ToString();
+
+        switch (key)
+        {
+            case "map":
+                if (!Map.TryParse(text, null, out var map) || map == null || map == Map.Internal)
+                {
+                    error = $"'{text}' is not a valid facet.";
+                    return false;
+                }
+
+                break;
+
+            case "vendor":
+                var vendor = AssemblyHandler.FindTypeByName(text);
+
+                if (vendor == null || !vendor.IsSubclassOf(typeof(BaseVendor)))
+                {
+                    error = $"'{text}' is not a BaseVendor type.";
+                    return false;
+                }
+
+                break;
+
+            case "creature":
+                var creature = AssemblyHandler.FindTypeByName(text);
+
+                if (creature == null
+                    || (!typeof(Mobile).IsAssignableFrom(creature) && !typeof(Item).IsAssignableFrom(creature)))
+                {
+                    error = $"'{text}' is not something a spawner can create.";
+                    return false;
+                }
+
+                break;
+
+            case "body":
+                if (!text.InsensitiveEquals("male") && !text.InsensitiveEquals("female")
+                    && !text.InsensitiveEquals("random"))
+                {
+                    error = $"Body '{text}' is not male, female or random.";
+                    return false;
+                }
+
+                break;
+
+            case "route":
+                // Blank is meaningful - a watch post with no route stands still.
+                if (!string.IsNullOrWhiteSpace(text)
+                    && AdminApiFiles.Follow(root, $"/routes/{AdminApiFiles.Escape(text)}") == null)
+                {
+                    error = $"There is no route named '{text}'.";
+                    return false;
+                }
+
+                break;
+
+            case "name":
+                if (string.IsNullOrWhiteSpace(text))
+                {
+                    error = "A name cannot be empty.";
+                    return false;
+                }
+
+                break;
+
+            default:
+                if (IsNumeric(key) && !int.TryParse(text, out _))
+                {
+                    error = $"'{key}' must be a whole number.";
+                    return false;
+                }
+
+                break;
         }
 
         error = null;
