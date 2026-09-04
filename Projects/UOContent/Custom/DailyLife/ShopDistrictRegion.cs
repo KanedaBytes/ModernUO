@@ -27,6 +27,12 @@ public class ShopDistrictRegion : GuardedRegion
     {
         var shops = TownScheduleConfig.Current?.Shops;
 
+        // Unregister before any early return. Bailing out first left the previous district
+        // registered with _instance still pointing at it, so a config that dropped the shops
+        // section - or gave it a zero-size rectangle - kept the old region live and unreachable.
+        _instance?.Unregister();
+        _instance = null;
+
         if (shops == null || shops.Width <= 0 || shops.Height <= 0)
         {
             return;
@@ -38,8 +44,6 @@ public class ShopDistrictRegion : GuardedRegion
         {
             return;
         }
-
-        _instance?.Unregister();
 
         var bounds = shops.ToBounds();
         var centre = new Point3D(

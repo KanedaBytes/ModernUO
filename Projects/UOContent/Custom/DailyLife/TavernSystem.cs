@@ -21,6 +21,9 @@ public static class TavernSystem
 
     public static int PatronCount => _patrons.Count;
 
+    /// <summary>Read-only view for the admin API's live-entity query.</summary>
+    public static IReadOnlyList<TavernPatron> Patrons => _patrons;
+
     public static void Initialize()
     {
         // Apply the current phase directly rather than waiting for a transition, so a restart at

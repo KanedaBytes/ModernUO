@@ -19,6 +19,9 @@ public static class RoutedTownsfolkSystem
 
     public static int WalkerCount => _walkers.Count;
 
+    /// <summary>Read-only view for the admin API's live-entity query.</summary>
+    public static IReadOnlyList<RoutedTownsfolk> Walkers => _walkers;
+
     /// <summary>
     ///     Rebuilds the route walkers from the current config. The teardown is essential - without
     ///     it a reload would leave the previous courier and farmer walking alongside the new ones.

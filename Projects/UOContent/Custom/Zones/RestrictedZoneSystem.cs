@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using ModernUO.CodeGeneratedEvents;
 using Server.Gumps;
+using Server.Json;
 using Server.Logging;
 using Server.Mobiles;
 using JailSys = Server.Systems.JailSystem.JailSystem;
@@ -12,22 +14,27 @@ namespace Server.Custom;
 ///     Owns the restricted-zone records, their live regions, and the 30-second countdown that hands
 ///     offenders to <c>JailSystem</c>.
 ///     <para>
-///         Persistence uses <c>GenericPersistence</c>, the current ModernUO mechanism for "my system
-///         owns a list of records that must survive a restart" - the same base <c>JailSystem</c>
-///         itself uses. Records are saved to <c>Saves/RestrictedZones/RestrictedZones.bin</c>
-///         alongside the world save.
+///         Zones live in <c>Data/Custom/restricted-zones.json</c>, not in the world save. A text
+///         file is diffable, hand-editable and editable by the shard editor, and it means drawing a
+///         zone no longer has to ride along on a world save to survive a restart. The trade is that
+///         a zone edit is no longer atomic with the rest of the world state, which for a
+///         staff-drawn box is not a property worth paying for.
 ///     </para>
 /// </summary>
-public class RestrictedZoneSystem : GenericPersistence
+public static class RestrictedZoneSystem
 {
     private static readonly ILogger logger = LogFactory.GetLogger(typeof(RestrictedZoneSystem));
 
-    public static readonly TimeSpan WarningDelay = TimeSpan.FromSeconds(30.0);
+    public const string ConfigPath = "Data/Custom/restricted-zones.json";
 
-    private static RestrictedZoneSystem _instance;
+    public static readonly TimeSpan WarningDelay = TimeSpan.FromSeconds(30.0);
 
     private static readonly List<RestrictedZoneRecord> _records = [];
     private static readonly Dictionary<RestrictedZoneRecord, RestrictedZoneRegion> _regions = [];
+
+    // False until Initialize(): loading during Configure() must not build regions yet, because
+    // their parents do not exist at that point in the boot sequence.
+    private static bool _regionsLive;
 
     // Transient by design: a restart clears every pending countdown, so nobody is ever jailed by a
     // timer they could not see.
@@ -49,20 +56,28 @@ public class RestrictedZoneSystem : GenericPersistence
     }
 
     /// <summary>
-    ///     Must be constructed in Configure(), which runs before World.Load(). A GenericPersistence
-    ///     self-registers in its constructor; miss this window and Deserialize is never called.
+    ///     Records are read here, but the regions they describe are not built until
+    ///     <see cref="Initialize" />. A region resolves its parent with <c>Region.Find</c>, and the
+    ///     town and dungeon regions it needs to find are loaded by <c>RegionJsonSerializer</c>
+    ///     after the Configure sweep has run.
     /// </summary>
     public static void Configure()
     {
-        _instance = new RestrictedZoneSystem();
+        if (!TryLoad(out var error))
+        {
+            logger.Error("Restricted zones are INACTIVE - {Path} was not loaded: {Error}", ConfigPath, error);
+        }
 
         // OnExit does NOT fire when a client disconnects - it fires only when the logout timer
         // expires, up to five minutes later. Cancel explicitly instead.
         EventSink.Disconnected += OnDisconnected;
     }
 
-    public RestrictedZoneSystem() : base("RestrictedZones", 10)
+    /// <summary>Runs after the world and the region tree are loaded, so parents resolve.</summary>
+    public static void Initialize()
     {
+        _regionsLive = true;
+        RegisterAll();
     }
 
     public static IReadOnlyList<RestrictedZoneRecord> Zones => _records;
@@ -89,6 +104,7 @@ public class RestrictedZoneSystem : GenericPersistence
 
         _records.Add(record);
         RegisterZone(record);
+        Save();
 
         return true;
     }
@@ -101,8 +117,151 @@ public class RestrictedZoneSystem : GenericPersistence
         }
 
         UnregisterZone(record);
+        Save();
 
         return true;
+    }
+
+    /// <summary>
+    ///     Replaces a zone in place. The region is rebuilt either way, and
+    ///     <c>Region.Register()</c> re-resolves everyone standing in the affected sectors, so a
+    ///     resized zone applies to its current occupants immediately.
+    /// </summary>
+    public static bool Replace(RestrictedZoneRecord existing, RestrictedZoneRecord replacement)
+    {
+        var index = _records.IndexOf(existing);
+
+        if (index < 0)
+        {
+            return false;
+        }
+
+        // A rename must not collide with a different zone.
+        var clash = Find(replacement.Name);
+
+        if (clash != null && !ReferenceEquals(clash, existing))
+        {
+            return false;
+        }
+
+        UnregisterZone(existing);
+        _records[index] = replacement;
+        RegisterZone(replacement);
+        Save();
+
+        return true;
+    }
+
+    /// <summary>
+    ///     Reads and validates the zone file, replacing the live set only on success. A bad file
+    ///     leaves the running zones in place and reports why, exactly as the daily life config does.
+    /// </summary>
+    public static bool TryLoad(out string error)
+    {
+        var path = Path.Combine(Core.BaseDirectory, ConfigPath);
+
+        try
+        {
+            var store = JsonConfig.Deserialize<RestrictedZoneStore>(path);
+
+            if (store == null)
+            {
+                error = $"No zone file found at {ConfigPath}.";
+                return false;
+            }
+
+            if (store.Zones == null)
+            {
+                error = "'zones' section is missing";
+                return false;
+            }
+
+            if (!Validate(store.Zones, out error))
+            {
+                logger.Error("Invalid restricted zone file at {Path}: {Error}", ConfigPath, error);
+                return false;
+            }
+
+            UnregisterAll();
+            _records.Clear();
+            _records.AddRange(store.Zones);
+
+            if (_regionsLive)
+            {
+                RegisterAll();
+            }
+
+            error = null;
+            return true;
+        }
+        catch (Exception ex)
+        {
+            error = ex.Message;
+            logger.Error(ex, "Failed to parse restricted zone file at {Path}; keeping the previous zones", ConfigPath);
+            return false;
+        }
+    }
+
+    /// <summary>
+    ///     Re-reads the zone file and rebuilds every region. Single entry point for the staff
+    ///     command and the admin API, so a bad file is reported the same way whichever asked.
+    /// </summary>
+    public static bool TryReload(out string error)
+    {
+        if (!TryLoad(out error))
+        {
+            World.BroadcastStaff($"Restricted zones NOT reloaded: {error}");
+            return false;
+        }
+
+        logger.Information("Reloaded {Count} restricted zone(s)", _records.Count);
+        return true;
+    }
+
+    public static void Save()
+    {
+        var path = Path.Combine(Core.BaseDirectory, ConfigPath);
+
+        JsonConfig.Serialize(path, new RestrictedZoneStore { Zones = new List<RestrictedZoneRecord>(_records) });
+    }
+
+    internal static bool Validate(List<RestrictedZoneRecord> records, out string error)
+    {
+        var errors = new List<string>();
+
+        // Find() matches case-insensitively, so two zones differing only in case would make one of
+        // them unreachable by name.
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        for (var i = 0; i < records.Count; i++)
+        {
+            var record = records[i];
+            var where = $"zones[{i}]";
+
+            if (string.IsNullOrWhiteSpace(record.Name))
+            {
+                errors.Add($"{where} has no name");
+            }
+            else if (!seen.Add(record.Name))
+            {
+                errors.Add($"{where} duplicates the name '{record.Name}'");
+            }
+
+            if (record.Map == null || record.Map == Map.Internal)
+            {
+                errors.Add($"{where} map '{record.MapName}' is not a valid facet");
+            }
+
+            if (record.Width <= 0 || record.Height <= 0)
+            {
+                errors.Add(
+                    $"{where} bounds must have a positive width and height (found {record.Width}x{record.Height})"
+                );
+            }
+        }
+
+        error = errors.Count > 0 ? string.Join("; ", errors) : null;
+        return errors.Count == 0;
     }
 
     private static void RegisterZone(RestrictedZoneRecord record)
@@ -305,34 +464,14 @@ public class RestrictedZoneSystem : GenericPersistence
         }
     }
 
-    public override void Serialize(IGenericWriter writer)
+    private static void UnregisterAll()
     {
-        writer.WriteEncodedInt(0); // version
-
-        writer.WriteEncodedInt(_records.Count);
-
         foreach (var record in _records)
         {
-            record.Serialize(writer);
-        }
-    }
-
-    public override void Deserialize(IGenericReader reader)
-    {
-        reader.ReadEncodedInt(); // version
-
-        var count = reader.ReadEncodedInt();
-
-        for (var i = 0; i < count; i++)
-        {
-            var record = new RestrictedZoneRecord();
-            record.Deserialize(reader);
-            _records.Add(record);
+            UnregisterZone(record);
         }
 
-        // Defer registration by a tick: regions rely on maps and parent regions being settled, and
-        // this runs in the middle of world load.
-        Timer.StartTimer(TimeSpan.Zero, RegisterAll);
+        _regions.Clear();
     }
 
     private static void RegisterAll()

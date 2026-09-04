@@ -12,6 +12,29 @@ public static class RestrictedZoneCommands
         CommandSystem.Register("RestrictZone", AccessLevel.GameMaster, RestrictZone_OnCommand);
         CommandSystem.Register("UnrestrictZone", AccessLevel.GameMaster, UnrestrictZone_OnCommand);
         CommandSystem.Register("ListRestrictedZones", AccessLevel.GameMaster, ListRestrictedZones_OnCommand);
+        CommandSystem.Register("ReloadRestrictedZones", AccessLevel.GameMaster, ReloadRestrictedZones_OnCommand);
+    }
+
+    [Usage("ReloadRestrictedZones")]
+    [Description("Re-reads restricted-zones.json and rebuilds every zone region.")]
+    public static void ReloadRestrictedZones_OnCommand(CommandEventArgs e)
+    {
+        var from = e.Mobile;
+
+        if (!RestrictedZoneSystem.TryReload(out var error))
+        {
+            // The previous zones are still live - nothing was torn down.
+            from.SendMessage(0x35, $"Restricted zones NOT reloaded: {error}");
+            from.SendMessage(0x35, "The shard is still running on the previously loaded zones.");
+            return;
+        }
+
+        from.SendMessage($"Restricted zones reloaded: {RestrictedZoneSystem.Zones.Count} zone(s).");
+
+        CommandLogging.WriteLine(
+            from,
+            $"{from.AccessLevel} {CommandLogging.Format(from)} reloading the restricted zone file"
+        );
     }
 
     [Usage("RestrictZone <name>")]

@@ -22,15 +22,13 @@ public static class DailyLifeCommands
     {
         var from = e.Mobile;
 
-        if (!TownScheduleConfig.TryLoad(out var error))
+        if (!TryReload(out var error))
         {
             // The previous config is still live - nothing was torn down.
             from.SendMessage(0x35, $"Daily life config NOT reloaded: {error}");
             from.SendMessage(0x35, "The town is still running on the previously loaded config.");
             return;
         }
-
-        Reload();
 
         from.SendMessage("Daily life config reloaded.");
         from.SendMessage(
@@ -41,6 +39,28 @@ public static class DailyLifeCommands
             from,
             $"{from.AccessLevel} {CommandLogging.Format(from)} reloading the daily life config"
         );
+    }
+
+    /// <summary>
+    ///     Re-reads the config and, if it is valid, rebuilds the town. The single entry point for
+    ///     both the staff command and the admin API, so a bad config is reported the same way
+    ///     whichever asked for the reload.
+    ///     <para>
+    ///         A failure is announced to every staff member online, not just the caller. An invalid
+    ///         config is a builder mistake whose only other symptom is a town that quietly stops
+    ///         filling up, which is exactly the kind of thing nobody notices for a week.
+    ///     </para>
+    /// </summary>
+    public static bool TryReload(out string error)
+    {
+        if (!TownScheduleConfig.TryLoad(out error))
+        {
+            World.BroadcastStaff($"Daily life config NOT reloaded: {error}");
+            return false;
+        }
+
+        Reload();
+        return true;
     }
 
     /// <summary>

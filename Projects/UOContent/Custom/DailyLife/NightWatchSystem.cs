@@ -16,6 +16,9 @@ public static class NightWatchSystem
 
     public static int WatchCount => _watch.Count;
 
+    /// <summary>Read-only view for the admin API's live-entity query.</summary>
+    public static IReadOnlyList<NightWatchman> Watchmen => _watch;
+
     public static void Initialize() => ApplyPhase(DayCycleSystem.Current);
 
     [OnEvent(nameof(DayCycleSystem.DayPhaseChangedEvent))]

@@ -35,6 +35,13 @@ public static class ShopScheduleSystem
 
     private static readonly List<ShopWalk> _walks = [];
 
+    /// <summary>
+    ///     Every vendor this system currently drives, with the shop point it was taken from. Held
+    ///     across reloads so a vendor dropped from the config can be handed back rather than left
+    ///     at home with <c>RangeHome</c> 0 and nothing to bring it in again.
+    /// </summary>
+    private static readonly List<DrivenVendor> _driven = [];
+
     public static bool ShopsAreClosed => DayCycleSystem.Current.IsAfterDark();
 
     public static void Initialize()
@@ -60,28 +67,33 @@ public static class ShopScheduleSystem
     ///         Snaps rather than walks - a reload should put shopkeepers where the new config says
     ///         they belong straight away, not send them strolling across town.
     ///     </para>
+    ///     <para>
+    ///         Unlike the tavern, watch and townsfolk systems this one does not own its NPCs, so it
+    ///         cannot rebuild by deleting them. Dropping an entry from the config is instead handled
+    ///         by returning that vendor to its shop - the same net effect, since a vendor left where
+    ///         the schedule abandoned it would stay there forever.
+    ///     </para>
     /// </summary>
     public static void Reload() => ApplyPhase(DayCycleSystem.Current, true);
 
     private static void ApplyPhase(DayPhase phase, bool snap)
     {
         var shops = TownScheduleConfig.Current?.Shops;
+        var map = shops?.GetMap();
 
-        if (shops?.Shops == null || shops.Shops.Count == 0)
+        if (shops?.Shops == null || shops.Shops.Count == 0 || map == null || map == Map.Internal)
         {
-            return;
-        }
-
-        var map = shops.GetMap();
-
-        if (map == null || map == Map.Internal)
-        {
+            // No shops left to drive. Everything we own goes back behind its counter.
+            ReleaseAll();
+            _walks.Clear();
             return;
         }
 
         var goingHome = phase.IsAfterDark();
 
         _walks.Clear();
+
+        var stillDriven = new List<DrivenVendor>(shops.Shops.Count);
 
         foreach (var shop in shops.Shops)
         {
@@ -104,6 +116,8 @@ public static class ShopScheduleSystem
                 // Normal enough: the spawner may not have produced one yet.
                 continue;
             }
+
+            stillDriven.Add(new DrivenVendor(vendor, shop.ToPoint3D(), map));
 
             var destination = goingHome
                 ? shop.HomeRoute[^1].ToPoint3D()
@@ -132,10 +146,73 @@ public static class ShopScheduleSystem
             _walks.Add(new ShopWalk(vendor, route));
         }
 
+        ReleaseVendorsMissingFrom(stillDriven);
+
+        _driven.Clear();
+        _driven.AddRange(stillDriven);
+
         logger.Information(
             "Shops {State}: {Count} shopkeeper(s) on the move",
             goingHome ? "closing" : "opening",
             _walks.Count
+        );
+    }
+
+    private static void ReleaseAll()
+    {
+        for (var i = 0; i < _driven.Count; i++)
+        {
+            Release(_driven[i]);
+        }
+
+        _driven.Clear();
+    }
+
+    private static void ReleaseVendorsMissingFrom(List<DrivenVendor> stillDriven)
+    {
+        for (var i = 0; i < _driven.Count; i++)
+        {
+            var previous = _driven[i];
+            var stillOwned = false;
+
+            for (var j = 0; j < stillDriven.Count; j++)
+            {
+                if (stillDriven[j].Vendor == previous.Vendor)
+                {
+                    stillOwned = true;
+                    break;
+                }
+            }
+
+            if (!stillOwned)
+            {
+                Release(previous);
+            }
+        }
+    }
+
+    /// <summary>
+    ///     Hands a vendor back to the spawner's world: shop position, shop-sized wander radius, and
+    ///     no schedule. Without this a vendor removed from the config keeps the dusk settings it was
+    ///     last given - standing at its lodgings with a wander radius of zero, permanently.
+    /// </summary>
+    private static void Release(DrivenVendor driven)
+    {
+        var vendor = driven.Vendor;
+
+        if (vendor?.Deleted != false)
+        {
+            return;
+        }
+
+        vendor.Home = driven.ShopLocation;
+        vendor.HomeMap = driven.ShopMap;
+        vendor.RangeHome = GetShopRange(vendor);
+        vendor.MoveToWorld(driven.ShopLocation, driven.ShopMap);
+
+        logger.Information(
+            "Shop '{Vendor}' is no longer scheduled; returned to its shop",
+            vendor.GetType().Name
         );
     }
 
@@ -177,6 +254,23 @@ public static class ShopScheduleSystem
     ///     guessing - this is the same re-anchor the pet-release order does.
     /// </summary>
     private static int GetShopRange(BaseVendor vendor) => vendor.Spawner?.WalkingRange ?? 5;
+
+    /// <summary>A vendor under this system's control, and the shop point to hand it back to.</summary>
+    private sealed class DrivenVendor
+    {
+        public DrivenVendor(BaseVendor vendor, Point3D shopLocation, Map shopMap)
+        {
+            Vendor = vendor;
+            ShopLocation = shopLocation;
+            ShopMap = shopMap;
+        }
+
+        public BaseVendor Vendor { get; }
+
+        public Point3D ShopLocation { get; }
+
+        public Map ShopMap { get; }
+    }
 
     /// <summary>One shopkeeper's journey, one leg at a time.</summary>
     private sealed class ShopWalk

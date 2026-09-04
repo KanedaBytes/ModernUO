@@ -1,11 +1,5 @@
 {
-  "anchor": {
-    "x": 1475,
-    "y": 1645,
-    "z": 20,
-    "map": "Trammel"
-  },
-
+  "anchor": { "x": 1475, "y": 1645, "z": 20, "map": "Trammel" },
   "tavern": {
     "x": 1493,
     "y": 1686,
@@ -25,7 +19,6 @@
       "Innkeeper! My cup is empty and my heart is heavy."
     ]
   },
-
   "routes": {
     "watch-north": [
       { "x": 1475, "y": 1620, "z": 20, "say": "All is well." },
@@ -46,6 +39,7 @@
       { "x": 1462, "y": 1672, "z": 0 },
       { "x": 1469, "y": 1668, "z": 0, "say": "Provisions ordered, provisions delivered." },
       { "x": 1460, "y": 1676, "z": 0 },
+      { "x": 1450, "y": 1681, "z": 0 },
       { "x": 1440, "y": 1686, "z": 0 }
     ],
     "farmer-loop": [
@@ -55,7 +49,6 @@
       { "x": 1450, "y": 1633, "z": 14 }
     ]
   },
-
   "watch": {
     "map": "Trammel",
     "posts": [
@@ -63,27 +56,12 @@
       { "x": 1470, "y": 1674, "z": 0, "route": "watch-south" }
     ]
   },
-
   "townsfolk": [
-    {
-      "name": "Perrin",
-      "title": "the courier",
-      "route": "courier-loop",
-      "map": "Trammel",
-      "body": "male"
-    },
-    {
-      "name": "Hedda",
-      "title": "the farmer",
-      "route": "farmer-loop",
-      "map": "Trammel",
-      "body": "female"
-    }
+    { "name": "Perrin", "title": "the courier", "route": "courier-loop", "map": "Trammel", "body": "male" },
+    { "name": "Hedda", "title": "the farmer", "route": "farmer-loop", "map": "Trammel", "body": "female" }
   ],
-
   "shops": {
     "map": "Trammel",
-
     "neverCloses": [
       "Banker",
       "Minter",
@@ -95,16 +73,16 @@
       "Waiter",
       "AnimalTrainer"
     ],
-
     "x": 1400,
     "y": 1570,
     "width": 210,
     "height": 170,
-
     "shops": [
       {
         "vendor": "Baker",
-        "x": 1450, "y": 1617, "z": 20,
+        "x": 1450,
+        "y": 1617,
+        "z": 20,
         "homeRoute": [
           { "x": 1450, "y": 1628, "z": 16 },
           { "x": 1450, "y": 1640, "z": 12 },
@@ -113,7 +91,9 @@
       },
       {
         "vendor": "Jeweler",
-        "x": 1451, "y": 1679, "z": 0,
+        "x": 1451,
+        "y": 1679,
+        "z": 0,
         "homeRoute": [
           { "x": 1451, "y": 1690, "z": 0 },
           { "x": 1441, "y": 1700, "z": 0 },
@@ -122,7 +102,9 @@
       },
       {
         "vendor": "Provisioner",
-        "x": 1469, "y": 1668, "z": 0,
+        "x": 1469,
+        "y": 1668,
+        "z": 0,
         "homeRoute": [
           { "x": 1469, "y": 1680, "z": 0 },
           { "x": 1478, "y": 1690, "z": 0 },
@@ -131,7 +113,9 @@
       },
       {
         "vendor": "Butcher",
-        "x": 1449, "y": 1723, "z": 6,
+        "x": 1449,
+        "y": 1723,
+        "z": 6,
         "homeRoute": [
           { "x": 1449, "y": 1712, "z": 6 },
           { "x": 1440, "y": 1704, "z": 0 },
@@ -140,7 +124,9 @@
       },
       {
         "vendor": "Bowyer",
-        "x": 1470, "y": 1578, "z": 20,
+        "x": 1470,
+        "y": 1578,
+        "z": 20,
         "homeRoute": [
           { "x": 1470, "y": 1590, "z": 20 },
           { "x": 1470, "y": 1602, "z": 20 },
@@ -149,7 +135,9 @@
       },
       {
         "vendor": "Carpenter",
-        "x": 1430, "y": 1597, "z": 20,
+        "x": 1430,
+        "y": 1597,
+        "z": 20,
         "homeRoute": [
           { "x": 1430, "y": 1608, "z": 20 },
           { "x": 1430, "y": 1620, "z": 20 },

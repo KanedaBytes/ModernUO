@@ -1,0 +1,198 @@
+:root {
+    --bg: #14171c;
+    --panel: #1c2027;
+    --line: #2c323c;
+    --text: #d7dbe2;
+    --muted: #838d9c;
+    --accent: #6fb3ff;
+    --danger: #ff7a6b;
+    --ok: #7bd88f;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+    margin: 0;
+    height: 100%;
+    background: var(--bg);
+    color: var(--text);
+    font: 13px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    overflow: hidden;
+}
+
+/* --- token gate --- */
+
+.gate {
+    display: grid;
+    place-items: center;
+    height: 100%;
+}
+
+.gate form {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 28px 32px;
+    width: min(420px, 90vw);
+}
+
+.gate h1 { margin: 0 0 8px; font-size: 18px; font-weight: 600; }
+.gate p { margin: 0 0 16px; color: var(--muted); }
+
+.gate input {
+    width: 100%;
+    padding: 9px 11px;
+    margin-bottom: 12px;
+    background: var(--bg);
+    border: 1px solid var(--line);
+    border-radius: 5px;
+    color: var(--text);
+    font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+}
+
+.gate button { width: 100%; }
+
+code {
+    font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+    color: var(--accent);
+}
+
+.error { color: var(--danger); min-height: 1.5em; margin: 8px 0 0 !important; }
+
+/* --- workspace --- */
+
+#workspace { display: block; height: 100%; }
+
+#map {
+    position: absolute;
+    inset: 0;
+    cursor: grab;
+    /* One pixel per game tile at the deepest zoom: never smooth it, the pixels are the data. */
+    image-rendering: pixelated;
+}
+
+#map.dragging { cursor: grabbing; }
+
+#sidebar {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 300px;
+    padding: 12px 14px;
+    background: color-mix(in srgb, var(--panel) 92%, transparent);
+    border-left: 1px solid var(--line);
+    overflow-y: auto;
+    backdrop-filter: blur(6px);
+}
+
+#sidebar header {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 14px;
+}
+
+#sidebar header select { flex: 1; }
+
+#sidebar h2 {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: .07em;
+    color: var(--muted);
+    margin: 18px 0 8px;
+}
+
+button, select {
+    padding: 7px 12px;
+    background: var(--bg);
+    border: 1px solid var(--line);
+    border-radius: 5px;
+    color: var(--text);
+    font: inherit;
+    cursor: pointer;
+}
+
+button:hover:not(:disabled), select:hover { border-color: var(--accent); }
+button:disabled { opacity: .45; cursor: default; }
+
+#save:not(:disabled) {
+    border-color: var(--ok);
+    color: var(--ok);
+}
+
+#layers { list-style: none; margin: 0; padding: 0; }
+
+#layers li { margin-bottom: 5px; }
+
+#layers label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+}
+
+#layers .swatch {
+    width: 10px;
+    height: 10px;
+    border-radius: 2px;
+    flex: none;
+}
+
+#layers .count { margin-left: auto; color: var(--muted); }
+
+/* --- property panel --- */
+
+#properties .name {
+    font-weight: 600;
+    margin: 0 0 2px;
+}
+
+#properties .kind { color: var(--muted); margin: 0 0 12px; }
+
+#properties label {
+    display: block;
+    margin-bottom: 8px;
+}
+
+#properties label span {
+    display: block;
+    color: var(--muted);
+    margin-bottom: 3px;
+}
+
+#properties input {
+    width: 100%;
+    padding: 5px 8px;
+    background: var(--bg);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    color: var(--text);
+    font: inherit;
+}
+
+#properties input[readonly] { color: var(--muted); }
+
+#properties .row { display: flex; gap: 8px; }
+#properties .row label { flex: 1; }
+
+.muted { color: var(--muted); }
+
+/* --- readout --- */
+
+#readout {
+    position: absolute;
+    left: 10px;
+    bottom: 10px;
+    display: flex;
+    gap: 14px;
+    padding: 5px 10px;
+    background: color-mix(in srgb, var(--panel) 88%, transparent);
+    border: 1px solid var(--line);
+    border-radius: 5px;
+    font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+    pointer-events: none;
+}
+
+#status { color: var(--muted); }
+#status.error { color: var(--danger); }
+#status.ok { color: var(--ok); }

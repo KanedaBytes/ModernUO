@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Shard Editor</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="token-gate" class="gate">
+    <form id="token-form">
+        <h1>Shard Editor</h1>
+        <p>Paste <code>adminapi.token</code> from <code>Distribution/Configuration/modernuo.json</code>.</p>
+        <input id="token-input" type="password" autocomplete="off" spellcheck="false" placeholder="Bearer token">
+        <button type="submit">Connect</button>
+        <p id="token-error" class="error"></p>
+    </form>
+</div>
+
+<main id="workspace" hidden>
+    <canvas id="map"></canvas>
+
+    <aside id="sidebar">
+        <header>
+            <select id="facet" title="Facet"></select>
+            <button id="save" disabled>Save</button>
+        </header>
+
+        <section>
+            <h2>Layers</h2>
+            <ul id="layers"></ul>
+        </section>
+
+        <section>
+            <h2>Selection</h2>
+            <div id="properties"><p class="muted">Nothing selected.</p></div>
+        </section>
+
+        <section>
+            <h2>Keys</h2>
+            <dl class="keys">
+                <dt>Drag</dt><dd>pan, or move the selection</dd>
+                <dt>Wheel</dt><dd>zoom</dd>
+                <dt>Click</dt><dd>select</dd>
+                <dt>Ctrl+Z</dt><dd>undo</dd>
+                <dt>Esc</dt><dd>deselect</dd>
+            </dl>
+        </section>
+    </aside>
+
+    <div id="readout"><span id="coords">-</span><span id="status"></span></div>
+</main>
+
+<script type="module" src="js/app.js"></script>
+</body>
+</html>

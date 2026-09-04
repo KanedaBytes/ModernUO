@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Renders each facet to a PNG tile pyramid for the shard editor.
+
+    Deliberately NOT listed in ModernUO.slnx: adding a project there edits an upstream file and
+    conflicts on every merge from upstream. Build and run it directly instead; see SHARD.md for
+    the exact commands.
+
+    Output goes to bin/ (already gitignored by /Projects/*/bin), not Distribution/, so building
+    the tool never adds untracked files next to the server.
+-->
+<Project Sdk="Microsoft.NET.Sdk">
+    <PropertyGroup>
+        <OutputType>Exe</OutputType>
+        <AssemblyName>MapExport</AssemblyName>
+        <RootNamespace>Server.Tools.MapExport</RootNamespace>
+        <Product>ModernUO Shard Editor Map Export</Product>
+        <Configurations>Debug;Release;Analyze</Configurations>
+        <Version>0.0.0</Version>
+    </PropertyGroup>
+    <ItemGroup>
+        <!--
+            The whole point: read the .mul and .uop files with the server's own TileMatrix rather
+            than reimplementing the UOP index and block layout.
+
+            OutDir is overridden for the referenced projects. Server.csproj and Logger.csproj build
+            into Distribution/ by design, so a plain ProjectReference would make building this tool
+            rewrite the server's binaries, and fail outright while the server is running. Nothing
+            here needs Distribution, so the referenced projects are built into this tool's own
+            bin/deps instead. The tool can then be built and run with the shard up.
+        -->
+        <ProjectReference Include="..\Server\Server.csproj">
+            <AdditionalProperties>OutDir=$(MSBuildThisFileDirectory)bin\$(Configuration)\deps\</AdditionalProperties>
+        </ProjectReference>
+    </ItemGroup>
+</Project>
