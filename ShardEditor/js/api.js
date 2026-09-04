@@ -77,5 +77,10 @@ export const api = {
     patch: (edits) => request('PATCH', '/api/shapes', edits),
     // The empty object is required, not cosmetic: on Windows, http.sys rejects a POST with no
     // Content-Length with a 411 before the listener ever sees the request.
-    reload: (system) => request('POST', `/api/reload/${system}`, {})
+    reload: (system) => request('POST', `/api/reload/${system}`, {}),
+    types: () => request('GET', '/api/types'),
+    create: (shape) => request('POST', '/api/shapes/create', shape),
+    // POST rather than DELETE: http.sys is particular about bodies on DELETE, and the pointer
+    // identifying the shape has to travel somewhere.
+    remove: (target) => request('POST', '/api/shapes/delete', target)
 };

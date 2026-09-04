@@ -187,8 +187,7 @@ internal static class AdminApiFiles
                 return null;
             }
 
-            // RFC 6901 escaping: ~1 is '/', ~0 is '~', and in that order.
-            var token = raw.Replace("~1", "/").Replace("~0", "~");
+            var token = Unescape(raw);
 
             switch (current)
             {
@@ -207,6 +206,61 @@ internal static class AdminApiFiles
         return current;
     }
 
+    /// <summary>
+    ///     Removes the node at <paramref name="pointer" /> from its parent - an element from an
+    ///     array, or a key from an object (which is how a named route is deleted).
+    /// </summary>
+    public static bool Remove(JsonNode root, string pointer)
+    {
+        var separator = pointer.LastIndexOf('/');
+
+        if (separator < 0)
+        {
+            return false;
+        }
+
+        var parent = Follow(root, pointer[..separator]);
+        var token = Unescape(pointer[(separator + 1)..]);
+
+        switch (parent)
+        {
+            case JsonArray array when int.TryParse(token, out var index)
+                                      && index >= 0 && index < array.Count:
+                array.RemoveAt(index);
+                return true;
+            case JsonObject obj:
+                return obj.Remove(token);
+            default:
+                return false;
+        }
+    }
+
+    /// <summary>
+    ///     Appends to the array at <paramref name="pointer" />, creating it when absent, and returns
+    ///     the pointer to the new element so the caller can hand the editor something to select.
+    /// </summary>
+    public static string Append(JsonNode root, string pointer, JsonNode value)
+    {
+        if (Follow(root, pointer) is not JsonArray array)
+        {
+            array = [];
+
+            if (!Replace(root, pointer, array))
+            {
+                return null;
+            }
+        }
+
+        array.Add(value);
+
+        return $"{pointer}/{array.Count - 1}";
+    }
+
+    /// <summary>RFC 6901 escaping: ~1 is '/', ~0 is '~', and in that order.</summary>
+    public static string Escape(string token) => token.Replace("~", "~0").Replace("/", "~1");
+
+    private static string Unescape(string token) => token.Replace("~1", "/").Replace("~0", "~");
+
     /// <summary>Replaces the node at <paramref name="pointer" /> within its parent.</summary>
     public static bool Replace(JsonNode root, string pointer, JsonNode value)
     {
@@ -218,7 +272,7 @@ internal static class AdminApiFiles
         }
 
         var parent = Follow(root, pointer[..separator]);
-        var token = pointer[(separator + 1)..].Replace("~1", "/").Replace("~0", "~");
+        var token = Unescape(pointer[(separator + 1)..]);
 
         switch (parent)
         {

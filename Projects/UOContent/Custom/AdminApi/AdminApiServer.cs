@@ -220,6 +220,17 @@ public static class AdminApiServer
             case "/api/shapes" when method == "PATCH":
                 PatchShapes(context);
                 return;
+            case "/api/shapes/create" when method == "POST":
+                CreateShape(context);
+                return;
+            // POST rather than DELETE: http.sys is particular about bodies on DELETE, and the
+            // pointer identifying the shape has to travel somewhere.
+            case "/api/shapes/delete" when method == "POST":
+                DeleteShape(context);
+                return;
+            case "/api/types" when method == "GET":
+                Types(context);
+                return;
             case "/api/entities" when method == "GET":
                 Entities(context);
                 return;
@@ -251,6 +262,7 @@ public static class AdminApiServer
                     worldState = World.WorldState.ToString(),
                     facets = FacetNames(),
                     zones = RestrictedZoneSystem.Zones.Count,
+                    spawners = LiveSpawnerCount(),
                     dailyLifeLoaded = TownScheduleConfig.Current != null
                 },
                 out var status,
@@ -320,6 +332,101 @@ public static class AdminApiServer
         }
 
         Send(context, 200, new { applied = edits.Count });
+    }
+
+    private static void CreateShape(HttpListenerContext context)
+    {
+        if (!TryReadBody<AdminApiMutations.CreateRequest>(context, out var request))
+        {
+            return;
+        }
+
+        if (!AdminApiLoop.TryRun(
+                () =>
+                {
+                    var ok = AdminApiMutations.Create(request, out var createError, out var pointer);
+                    return (ok, createError, pointer);
+                },
+                out var result,
+                out var error
+            ))
+        {
+            Send(context, 503, new { error });
+            return;
+        }
+
+        if (!result.ok)
+        {
+            Send(context, 400, new { error = result.createError });
+            return;
+        }
+
+        Send(context, 200, new { pointer = result.pointer });
+    }
+
+    private static void DeleteShape(HttpListenerContext context)
+    {
+        if (!TryReadBody<AdminApiMutations.DeleteRequest>(context, out var request))
+        {
+            return;
+        }
+
+        if (!AdminApiLoop.TryRun(
+                () =>
+                {
+                    var ok = AdminApiMutations.Delete(request, out var deleteError);
+                    return (ok, deleteError);
+                },
+                out var result,
+                out var error
+            ))
+        {
+            Send(context, 503, new { error });
+            return;
+        }
+
+        if (!result.ok)
+        {
+            Send(context, 400, new { error = result.deleteError });
+            return;
+        }
+
+        Send(context, 200, new { ok = true });
+    }
+
+    private static void Types(HttpListenerContext context)
+    {
+        if (!AdminApiLoop.TryRun(AdminApiMutations.Types, out var types, out var error))
+        {
+            Send(context, 503, new { error });
+            return;
+        }
+
+        Send(context, 200, types);
+    }
+
+    /// <summary>Reads and deserializes a JSON body, answering 400 itself when it cannot.</summary>
+    private static bool TryReadBody<T>(HttpListenerContext context, out T value) where T : class
+    {
+        value = null;
+
+        try
+        {
+            value = JsonSerializer.Deserialize<T>(ReadBody(context.Request), _json);
+        }
+        catch (JsonException ex)
+        {
+            Send(context, 400, new { error = $"Malformed request: {ex.Message}" });
+            return false;
+        }
+
+        if (value == null)
+        {
+            Send(context, 400, new { error = "Empty request." });
+            return false;
+        }
+
+        return true;
     }
 
     private static void Entities(HttpListenerContext context)
@@ -559,6 +666,32 @@ public static class AdminApiServer
     ///     with what MapExport rendered - offering TerMur under ML would give a picker entry with
     ///     no tiles behind it.
     /// </summary>
+    /// <summary>
+    ///     How many spawners are actually live in the world, as opposed to how many are described
+    ///     in the files - the two diverge until a spawner reload, and that gap is worth being able
+    ///     to see.
+    ///     <para>
+    ///         Iterates World.Items, which the audit rules discourage. It is justified here and only
+    ///         here: /api/status is requested once when the editor connects, never polled, and there
+    ///         is no spatial query for "every spawner anywhere". <c>ImportSpawnersCommand</c> builds
+    ///         its own index the same way.
+    ///     </para>
+    /// </summary>
+    private static int LiveSpawnerCount()
+    {
+        var count = 0;
+
+        foreach (var item in World.Items.Values)
+        {
+            if (item is ISpawner)
+            {
+                count++;
+            }
+        }
+
+        return count;
+    }
+
     private static List<object> FacetNames()
     {
         var facets = new List<object>();

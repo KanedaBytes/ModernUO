@@ -15,21 +15,23 @@ export const LAYERS = {
 const HANDLE = 5;
 const GRAB = 7;
 
-export function draw(ctx, view, shapes, visible, selected) {
+export function draw(ctx, view, shapes, visible, selected, hovered) {
     for (const shape of shapes) {
         if (!visible.has(shape.layer) || shape.map !== view.facet.name) {
             continue;
         }
 
-        drawShape(ctx, view, shape, shape === selected);
+        drawShape(ctx, view, shape, shape === selected, shape === hovered);
     }
 }
 
-function drawShape(ctx, view, shape, isSelected) {
+function drawShape(ctx, view, shape, isSelected, isHovered) {
     const color = LAYERS[shape.layer].color;
 
-    ctx.lineWidth = isSelected ? 2 : 1;
-    ctx.strokeStyle = isSelected ? '#ffffff' : color;
+    // Hover is deliberately quieter than selection: it answers "what would a click take?" without
+    // competing with "what is currently taken".
+    ctx.lineWidth = isSelected ? 2 : isHovered ? 2 : 1;
+    ctx.strokeStyle = isSelected ? '#ffffff' : isHovered ? '#cfe4ff' : color;
     ctx.fillStyle = color;
 
     if (shape.kind === 'rect') {
@@ -38,7 +40,7 @@ function drawShape(ctx, view, shape, isSelected) {
         const sw = w * view.scale;
         const sh = h * view.scale;
 
-        ctx.globalAlpha = 0.18;
+        ctx.globalAlpha = isHovered && !isSelected ? 0.3 : 0.18;
         ctx.fillRect(sx, sy, sw, sh);
         ctx.globalAlpha = 1;
         ctx.strokeRect(sx, sy, sw, sh);
@@ -73,7 +75,7 @@ function drawShape(ctx, view, shape, isSelected) {
 
         for (const [x, y] of shape.points) {
             const [sx, sy] = view.toScreen(x + 0.5, y + 0.5);
-            ctx.fillStyle = isSelected ? '#ffffff' : color;
+            ctx.fillStyle = isSelected ? '#ffffff' : isHovered ? '#cfe4ff' : color;
             ctx.fillRect(sx - HANDLE / 2, sy - HANDLE / 2, HANDLE, HANDLE);
         }
 
@@ -91,11 +93,53 @@ function drawShape(ctx, view, shape, isSelected) {
     const [sx, sy] = view.toScreen(x + 0.5, y + 0.5);
 
     ctx.beginPath();
-    ctx.arc(sx, sy, isSelected ? 6 : 4, 0, Math.PI * 2);
+    ctx.arc(sx, sy, isSelected || isHovered ? 6 : 4, 0, Math.PI * 2);
     ctx.fill();
     ctx.stroke();
 
     label(ctx, view, shape, x, y);
+}
+
+/** The shape a click would take right now - same rules as hitTest, ignoring handles. */
+export function pick(view, shapes, visible, worldX, worldY) {
+    const found = hitTest(view, shapes, visible, null, worldX, worldY);
+
+    return found ? found.shape : null;
+}
+
+/** Draws whatever the active create tool has collected so far. */
+export function drawDraft(ctx, view, draft) {
+    if (!draft || !draft.points.length) {
+        return;
+    }
+
+    ctx.save();
+    ctx.setLineDash([5, 4]);
+    ctx.strokeStyle = '#ffd479';
+    ctx.fillStyle = '#ffd479';
+    ctx.lineWidth = 2;
+
+    if (draft.kind === 'rect' && draft.rect) {
+        const [x, y, w, h] = draft.rect;
+        const [sx, sy] = view.toScreen(x, y);
+        ctx.strokeRect(sx, sy, w * view.scale, h * view.scale);
+    } else {
+        ctx.beginPath();
+
+        draft.points.forEach(([x, y], i) => {
+            const [sx, sy] = view.toScreen(x + 0.5, y + 0.5);
+            i === 0 ? ctx.moveTo(sx, sy) : ctx.lineTo(sx, sy);
+        });
+
+        ctx.stroke();
+
+        for (const [x, y] of draft.points) {
+            const [sx, sy] = view.toScreen(x + 0.5, y + 0.5);
+            ctx.fillRect(sx - 3, sy - 3, 6, 6);
+        }
+    }
+
+    ctx.restore();
 }
 
 function label(ctx, view, shape, x, y) {

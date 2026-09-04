@@ -20,6 +20,16 @@
 <main id="workspace" hidden>
     <canvas id="map"></canvas>
 
+    <!-- Stays until dismissed. A save that fails must never scroll past in a toast: the whole
+         reason edits used to vanish was a failure nobody saw. -->
+    <div id="banner" hidden>
+        <div id="banner-text"></div>
+        <div id="banner-actions">
+            <button id="banner-discard" type="button">Discard my edits</button>
+            <button id="banner-dismiss" type="button">Dismiss</button>
+        </div>
+    </div>
+
     <aside id="sidebar">
         <header>
             <select id="facet" title="Facet"></select>
@@ -32,6 +42,11 @@
         </section>
 
         <section>
+            <h2>Create</h2>
+            <div id="create-buttons"></div>
+        </section>
+
+        <section>
             <h2>Selection</h2>
             <div id="properties"><p class="muted">Nothing selected.</p></div>
         </section>
@@ -39,17 +54,41 @@
         <section>
             <h2>Keys</h2>
             <dl class="keys">
-                <dt>Drag</dt><dd>pan, or move the selection</dd>
-                <dt>Wheel</dt><dd>zoom</dd>
                 <dt>Click</dt><dd>select</dd>
+                <dt>Drag</dt><dd>pan; moves the selected shape only</dd>
+                <dt>Space+drag</dt><dd>always pans</dd>
+                <dt>Middle drag</dt><dd>always pans</dd>
+                <dt>Wheel</dt><dd>zoom</dd>
+                <dt>Delete</dt><dd>remove the selection</dd>
                 <dt>Ctrl+Z</dt><dd>undo</dd>
-                <dt>Esc</dt><dd>deselect</dd>
+                <dt>Enter</dt><dd>finish a route</dd>
+                <dt>Esc</dt><dd>deselect, or cancel</dd>
             </dl>
         </section>
     </aside>
 
-    <div id="readout"><span id="coords">-</span><span id="status"></span></div>
+    <div id="readout">
+        <span id="coords">-</span>
+        <span id="hint"></span>
+        <span id="status"></span>
+    </div>
 </main>
+
+<div id="modal" hidden>
+    <form id="modal-form">
+        <h2 id="modal-title"></h2>
+        <div id="modal-fields"></div>
+        <p id="modal-error" class="error"></p>
+        <div class="modal-actions">
+            <button type="button" id="modal-cancel">Cancel</button>
+            <button type="submit" id="modal-ok">Create</button>
+        </div>
+    </form>
+</div>
+
+<datalist id="vendor-list"></datalist>
+<datalist id="creature-list"></datalist>
+<datalist id="route-list"></datalist>
 
 <script type="module" src="js/app.js"></script>
 </body>
