@@ -1,4 +1,5 @@
 :root {
+    --sidebar: 300px;
     --bg: #14171c;
     --panel: #1c2027;
     --line: #2c323c;
@@ -10,6 +11,15 @@
 }
 
 * { box-sizing: border-box; }
+
+/*
+ * The UA stylesheet's [hidden] { display: none } is a low-specificity rule, so ANY author rule
+ * that sets display on the same element silently defeats it - which is exactly what
+ * .gate { display: grid } and #workspace { display: block } were doing. The token modal stayed
+ * on screen with its hidden attribute correctly set. Restore the attribute's meaning globally
+ * rather than per-element, so the next element given a display rule cannot reintroduce this.
+ */
+[hidden] { display: none !important; }
 
 html, body {
     margin: 0;
@@ -63,9 +73,19 @@ code {
 
 #workspace { display: block; height: 100%; }
 
+/*
+ * A canvas is a replaced element, so `inset: 0` does NOT stretch it: with width/height auto, CSS
+ * resolves the over-constrained case by ignoring `right`/`bottom` and using the intrinsic 300x150.
+ * The size has to be stated outright. The drawing buffer is then sized from this box in
+ * View.resize(), scaled by devicePixelRatio.
+ */
 #map {
     position: absolute;
-    inset: 0;
+    top: 0;
+    left: 0;
+    width: calc(100% - var(--sidebar));
+    height: 100%;
+    display: block;
     cursor: grab;
     /* One pixel per game tile at the deepest zoom: never smooth it, the pixels are the data. */
     image-rendering: pixelated;
@@ -78,12 +98,13 @@ code {
     top: 0;
     right: 0;
     bottom: 0;
-    width: 300px;
+    width: var(--sidebar);
     padding: 12px 14px;
-    background: color-mix(in srgb, var(--panel) 92%, transparent);
+    /* Opaque: the canvas now stops at the sidebar rather than running underneath it, so there is
+       nothing behind this to blur. */
+    background: var(--panel);
     border-left: 1px solid var(--line);
     overflow-y: auto;
-    backdrop-filter: blur(6px);
 }
 
 #sidebar header {
@@ -192,6 +213,17 @@ button:disabled { opacity: .45; cursor: default; }
     font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
     pointer-events: none;
 }
+
+/* Without an explicit grid a dt/dd pair wraps onto two lines each, which read as eight rows. */
+.keys {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 3px 10px;
+    margin: 0;
+}
+
+.keys dt { color: var(--muted); }
+.keys dd { margin: 0; }
 
 #status { color: var(--muted); }
 #status.error { color: var(--danger); }

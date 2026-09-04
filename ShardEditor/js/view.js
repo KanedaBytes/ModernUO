@@ -8,6 +8,20 @@
 
 const TILE_SIZE = 256;
 
+/*
+ * Where to open a facet. Britannia is 7168x4096 and almost entirely empty of anything this editor
+ * edits, so opening on the geometric centre lands in open sea a long way from Britain. Per
+ * SHARD.md, Trammel is the primary facet and every configured shape is in Britain; Felucca shares
+ * the same terrain, so the same point is right there too. A facet with no entry opens fitted to
+ * the window.
+ */
+const FACET_FOCUS = {
+    Trammel: { x: 1475, y: 1645, scale: 2 },
+    Felucca: { x: 1475, y: 1645, scale: 2 }
+};
+
+export const DEFAULT_FACET = 'Trammel';
+
 export class View {
     constructor(canvas) {
         this.canvas = canvas;
@@ -23,9 +37,15 @@ export class View {
     setFacet(facet) {
         this.facet = facet;
         this.maxZoom = maxZoomFor(facet.width, facet.height);
-        this.centerX = facet.width / 2;
-        this.centerY = facet.height / 2;
-        this.scale = fitScale(facet, this.canvas);
+
+        const focus = FACET_FOCUS[facet.name];
+
+        // Scale first: clampCenter is bounds-only, but minScale depends on the canvas box, so this
+        // has to run after the canvas has been laid out.
+        this.scale = Math.max(focus ? focus.scale : fitScale(facet, this.canvas), this.minScale());
+        this.centerX = focus ? focus.x : facet.width / 2;
+        this.centerY = focus ? focus.y : facet.height / 2;
+        this.clampCenter();
     }
 
     /** Level whose pixels are closest to the current scale, clamped to what was rendered. */
@@ -91,14 +111,27 @@ export class View {
         this.centerY = clamp(this.centerY, 0, this.facet.height);
     }
 
+    /**
+     * Sizes the drawing buffer from the element's CSS box, scaled by devicePixelRatio so the map is
+     * sharp on a high-DPI display rather than a stretched low-res image. The transform then lets
+     * every other coordinate in this file stay in CSS pixels.
+     */
     resize() {
         const ratio = window.devicePixelRatio || 1;
         const width = this.canvas.clientWidth;
         const height = this.canvas.clientHeight;
 
+        if (width === 0 || height === 0) {
+            // Laid out at zero (still hidden, for instance). Writing a zero-sized buffer would
+            // throw off every later scale calculation, so leave the last good one alone.
+            return false;
+        }
+
         this.canvas.width = Math.round(width * ratio);
         this.canvas.height = Math.round(height * ratio);
         this.ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+
+        return true;
     }
 
     drawMap() {

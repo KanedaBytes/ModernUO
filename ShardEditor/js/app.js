@@ -1,7 +1,7 @@
 // Wiring: state, input, undo, save.
 
 import { api, loadStoredToken, setToken, clearToken } from './api.js';
-import { View } from './view.js';
+import { View, DEFAULT_FACET } from './view.js';
 import {
     LAYERS, draw, drawEntities, hitTest, geometryOf, applyGeometry, moveShape, resizeRect, moveNode
 } from './shapes.js';
@@ -70,8 +70,10 @@ async function connect(token, remember) {
         buildFacetPicker();
         buildLayerList();
 
+        // Size the canvas before choosing a view: setFacet's scale clamp reads the canvas box, and
+        // the workspace has only just become visible.
         view.resize();
-        view.setFacet(state.facets.find((f) => f.name === 'Trammel') || state.facets[0]);
+        showFacet(state.facets.find((f) => f.name === DEFAULT_FACET) || state.facets[0]);
 
         await refreshShapes();
         pollEntities();
@@ -96,10 +98,17 @@ function buildFacetPicker() {
     }
 
     dom.facet.addEventListener('change', () => {
-        view.setFacet(state.facets.find((f) => f.name === dom.facet.value));
-        select(null);
-        render();
+        showFacet(state.facets.find((f) => f.name === dom.facet.value));
     });
+}
+
+/** Keeps the picker and the view on the same facet - setting one without the other showed Felucca
+ *  in the dropdown while the map was on Trammel. */
+function showFacet(facet) {
+    view.setFacet(facet);
+    dom.facet.value = facet.name;
+    select(null);
+    render();
 }
 
 function buildLayerList() {
@@ -199,10 +208,30 @@ function render() {
     });
 }
 
-window.addEventListener('resize', () => {
-    view.resize();
-    render();
-});
+// A ResizeObserver on the canvas itself, rather than a window resize listener: it also fires for
+// the first real layout after the workspace stops being hidden, which is when the buffer must be
+// sized. The media query covers a move to a display with a different pixel ratio, where the CSS
+// box does not change but the buffer needs to.
+new ResizeObserver(() => {
+    if (view.facet && view.resize()) {
+        render();
+    }
+}).observe(dom.canvas);
+
+function watchPixelRatio() {
+    const query = matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`);
+
+    query.addEventListener('change', () => {
+        if (view.facet) {
+            view.resize();
+            render();
+        }
+
+        watchPixelRatio();
+    }, { once: true });
+}
+
+watchPixelRatio();
 
 // --- input -----------------------------------------------------------------------------------
 

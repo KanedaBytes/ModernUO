@@ -77,7 +77,13 @@ function drawShape(ctx, view, shape, isSelected) {
             ctx.fillRect(sx - HANDLE / 2, sy - HANDLE / 2, HANDLE, HANDLE);
         }
 
-        label(ctx, view, shape, shape.points[0][0], shape.points[0][1]);
+        // Only when selected. Ten routes and walk-home paths all labelled at once buries the town
+        // centre in overlapping text, and a polyline is identifiable from its shape anyway - unlike
+        // a point, where the label is the only thing telling two markers apart.
+        if (isSelected) {
+            label(ctx, view, shape, shape.points[0][0], shape.points[0][1]);
+        }
+
         return;
     }
 
